@@ -1,0 +1,338 @@
+<import name="simple-keyboard" src="../../components/SimpleKeyboard/SimpleKeyboard.ux" />
+
+<template>
+  <div class="page">
+    <!-- 顶部栏 -->
+    <div class="navbar">
+      <div class="nav-back" onclick="goBack">
+        <text class="nav-icon">&lt;</text>
+      </div>
+      <text class="nav-title">代理设置</text>
+      <div class="nav-placeholder"></div>
+    </div>
+
+    <div class="content">
+      <text class="section-title">JS 渲染代理验证码</text>
+      <text class="hint">在易聊社区（yhdet.top）个人主页复制你的专属验证码，填入下方。验证码仅保存在本机，不上传。</text>
+
+      <!-- 开关：是否启用 JS 渲染代理（默认关闭 = 直连，普通站点无需验证码） -->
+      <div class="switch-row" onclick="toggleProxy">
+        <text class="switch-label">启用 JS 渲染代理</text>
+        <div class="switch {{useProxy ? 'on' : ''}}">
+          <div class="switch-knob {{useProxy ? 'on' : ''}}"></div>
+        </div>
+      </div>
+      <text class="hint">开启后优先用服务器执行 JS 渲染（需已填入验证码）；关闭则直连，普通站点无需验证码即可浏览。</text>
+
+      <!-- 当前输入/已保存展示 -->
+      <div class="token-box" onclick="showKeyboard">
+        <text class="token-text" if="{{tokenInput}}">{{tokenInput}}</text>
+        <text class="token-placeholder" if="{{!tokenInput}}">点击此处输入验证码</text>
+      </div>
+
+      <div class="btn-row">
+        <div class="btn btn-clear" onclick="clearInput">
+          <text class="btn-text">清空</text>
+        </div>
+        <div class="btn btn-save" onclick="saveToken">
+          <text class="btn-text">保存</text>
+        </div>
+      </div>
+
+      <text class="saved-tip" if="{{savedToken}}">已保存：{{savedToken}}</text>
+      <text class="saved-tip warn" if="{{!savedToken}}">尚未保存，代理功能不可用</text>
+    </div>
+
+    <!-- 输入键盘 -->
+    <simple-keyboard
+      visible="{{kbVisible}}"
+      input-value="{{tokenInput}}"
+      placeholder="输入代理验证码"
+      onkeyinput="onKeyInput"
+      onkeydelete="onKeyDelete"
+      onkeyclear="onKeyClear"
+      onkeycancel="onKeyCancel"
+      onkeyconfirm="onKeyConfirm"
+    />
+
+    <div class="toast" if="{{showToast}}">
+      <text class="toast-text">{{toastMsg}}</text>
+    </div>
+  </div>
+</template>
+
+<script>
+import router from "@system.router"
+import storage from "@system.storage"
+
+export default {
+  private: {
+    tokenInput: '',
+    savedToken: '',
+    useProxy: false,
+    kbVisible: false,
+    toastMsg: '',
+    showToast: false
+  },
+
+  onInit() {
+    storage.get({
+      key: 'proxy_token',
+      success: (data) => {
+        this.savedToken = data || ''
+        this.tokenInput = data || ''
+      },
+      fail: () => {}
+    })
+    storage.get({
+      key: 'use_proxy',
+      success: (data) => { this.useProxy = (data === 'true' || data === true) },
+      fail: () => {}
+    })
+  },
+
+  showKeyboard() {
+    this.kbVisible = true
+  },
+
+  toggleProxy() {
+    this.useProxy = !this.useProxy
+    storage.set({
+      key: 'use_proxy',
+      value: this.useProxy ? 'true' : 'false',
+      success: () => this.toast(this.useProxy ? '已开启 JS 渲染代理' : '已关闭 JS 渲染代理'),
+      fail: () => this.toast('开关保存失败')
+    })
+  },
+
+  onKeyInput(e) {
+    const v = e && (e.value !== undefined ? e.value : (e.detail && e.detail.value))
+    if (v) this.tokenInput = (this.tokenInput || '') + v
+  },
+
+  onKeyDelete() {
+    this.tokenInput = (this.tokenInput || '').slice(0, -1)
+  },
+
+  onKeyClear() {
+    this.tokenInput = ''
+  },
+
+  onKeyCancel() {
+    this.kbVisible = false
+  },
+
+  onKeyConfirm() {
+    this.saveToken()
+  },
+
+  clearInput() {
+    this.tokenInput = ''
+  },
+
+  saveToken() {
+    const v = (this.tokenInput || '').trim()
+    if (!v) {
+      this.toast('请输入验证码')
+      return
+    }
+    storage.set({
+      key: 'proxy_token',
+      value: v,
+      success: () => {
+        this.savedToken = v
+        // 同时落盘代理开关，保证与验证码一致
+        storage.set({ key: 'use_proxy', value: this.useProxy ? 'true' : 'false' })
+        this.kbVisible = false
+        this.toast('已保存')
+      },
+      fail: () => this.toast('保存失败')
+    })
+  },
+
+  toast(msg) {
+    this.toastMsg = msg
+    this.showToast = true
+    setTimeout(() => { this.showToast = false }, 2000)
+  },
+
+  goBack() {
+    router.back()
+  }
+}
+</script>
+
+<style>
+.page {
+  flex-direction: column;
+  height: 480px;
+  background-color: #0a0a0a;
+}
+
+.navbar {
+  height: 48px;
+  flex-direction: row;
+  align-items: center;
+  padding: 0 12px;
+  background-color: #1c1c1e;
+}
+
+.nav-back {
+  width: 36px;
+  height: 36px;
+  justify-content: center;
+  align-items: center;
+}
+
+.nav-icon {
+  color: #0a84ff;
+  font-size: 20px;
+}
+
+.nav-title {
+  flex: 1;
+  text-align: center;
+  color: #ffffff;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.nav-placeholder {
+  width: 36px;
+}
+
+.content {
+  flex: 1;
+  flex-direction: column;
+  padding: 16px;
+}
+
+.section-title {
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.hint {
+  color: #8e8e93;
+  font-size: 12px;
+  line-height: 18px;
+  margin-bottom: 16px;
+}
+
+.token-box {
+  min-height: 56px;
+  background-color: #1c1c1e;
+  border: 1px solid #2c2c2e;
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 16px;
+  justify-content: center;
+}
+
+.switch-row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.switch-label {
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.switch {
+  width: 50px;
+  height: 28px;
+  border-radius: 14px;
+  background-color: #3a3a3c;
+  padding: 2px;
+  justify-content: flex-start;
+  transition: background-color 0.2s;
+}
+
+.switch.on {
+  background-color: #0a84ff;
+  justify-content: flex-end;
+}
+
+.switch-knob {
+  width: 24px;
+  height: 24px;
+  border-radius: 12px;
+  background-color: #ffffff;
+}
+
+.token-text {
+  color: #c9d1d9;
+  font-size: 15px;
+  line-height: 22px;
+  lines: 3;
+  text-overflow: ellipsis;
+}
+
+.token-placeholder {
+  color: #8e8e93;
+  font-size: 13px;
+}
+
+.btn-row {
+  flex-direction: row;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.btn {
+  width: 140px;
+  height: 44px;
+  border-radius: 12px;
+  justify-content: center;
+  align-items: center;
+}
+
+.btn-clear {
+  background-color: #2c2c2e;
+}
+
+.btn-save {
+  background-color: #0a84ff;
+}
+
+.btn-text {
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.saved-tip {
+  color: #30d158;
+  font-size: 12px;
+  line-height: 18px;
+  lines: 2;
+  text-overflow: ellipsis;
+}
+
+.saved-tip.warn {
+  color: #ff9f0a;
+}
+
+.toast {
+  position: fixed;
+  top: 100px;
+  left: 68px;
+  width: 200px;
+  height: 36px;
+  border-radius: 8px;
+  background-color: rgba(48, 209, 88, 0.95);
+  justify-content: center;
+  align-items: center;
+}
+
+.toast-text {
+  color: #ffffff;
+  font-size: 13px;
+}
+</style>

@@ -1,0 +1,278 @@
+<template>
+  <div class="page">
+    <div class="header">
+      <div class="back-btn" onclick="goBack">
+        <text class="back-icon">&lt;</text>
+      </div>
+      <text class="title">收藏夹</text>
+      <div class="edit-btn" onclick="toggleEdit">
+        <text class="edit-text">{{isEditing ? '完成' : '编辑'}}</text>
+      </div>
+    </div>
+
+    <scroll class="content" scroll-y="true">
+      <div class="list" if="{{bookmarks.length > 0}}">
+        <div class="item" for="{{(index, item) in bookmarks}}">
+          <div class="delete-btn" if="{{isEditing}}" onclick="deleteBookmark($idx)">
+            <text class="delete-icon">−</text>
+          </div>
+          <div class="item-content" onclick="openBookmark($idx)">
+            <div class="item-icon" style="background-color: {{item.color}}">
+              <text class="icon-text">{{item.icon}}</text>
+            </div>
+            <div class="item-info">
+              <text class="item-name">{{item.name}}</text>
+              <text class="item-url">{{formatUrl(item.url)}}</text>
+            </div>
+            <text class="item-arrow" if="{{!isEditing}}">›</text>
+          </div>
+        </div>
+      </div>
+
+      <div class="empty" if="{{bookmarks.length === 0}}">
+        <text class="empty-icon">*</text>
+        <text class="empty-text">暂无收藏</text>
+        <text class="empty-desc">浏览网页时点击收藏按钮添加</text>
+      </div>
+    </scroll>
+
+    <div class="toast" if="{{showToast}}">
+      <text class="toast-text">{{toastMsg}}</text>
+    </div>
+  </div>
+</template>
+
+<script>
+import router from "@system.router"
+import storage from "@system.storage"
+import { getStorageData, setStorageData, formatDisplayUrl } from "../../common/utils.js"
+
+export default {
+  private: {
+    bookmarks: [],
+    isEditing: false,
+    showToast: false,
+    toastMsg: ''
+  },
+
+  onShow() {
+    this.loadBookmarks()
+  },
+
+  async loadBookmarks() {
+    const data = await getStorageData(storage, 'user_bookmarks')
+    this.bookmarks = data.map(b => ({
+      ...b,
+      color: b.color || '#0a84ff',
+      icon: b.icon || b.name.charAt(0).toUpperCase()
+    }))
+  },
+
+  formatUrl(url) {
+    return formatDisplayUrl(url)
+  },
+
+  openBookmark(index) {
+    if (this.isEditing) return
+    const item = this.bookmarks[index]
+    if (item && item.url) {
+      router.push({ uri: 'pages/index', params: { url: item.url } })
+    }
+  },
+
+  toggleEdit() {
+    this.isEditing = !this.isEditing
+  },
+
+  async deleteBookmark(index) {
+    const item = this.bookmarks[index]
+    this.bookmarks.splice(index, 1)
+
+    const success = await setStorageData(storage, 'user_bookmarks', this.bookmarks)
+    if (success) {
+      this.showTip(`已删除 ${item.name}`)
+      if (this.bookmarks.length === 0) {
+        this.isEditing = false
+      }
+    } else {
+      this.showTip('删除失败')
+      this.bookmarks.splice(index, 0, item)
+    }
+  },
+
+  showTip(msg) {
+    this.toastMsg = msg
+    this.showToast = true
+    setTimeout(() => this.showToast = false, 2000)
+  },
+
+  goBack() {
+    router.back()
+  }
+}
+</script>
+
+<style>
+.page {
+  flex-direction: column;
+  height: 480px;
+  background-color: #000;
+}
+
+.header {
+  height: 44px;
+  flex-direction: row;
+  align-items: center;
+  padding: 0 10px;
+  background-color: #1c1c1e;
+}
+
+.back-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 16px;
+  background-color: #2c2c2e;
+  justify-content: center;
+  align-items: center;
+}
+
+.back-icon {
+  color: #0a84ff;
+  font-size: 18px;
+}
+
+.title {
+  flex: 1;
+  text-align: center;
+  color: #fff;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.edit-btn {
+  padding: 6px 12px;
+  border-radius: 6px;
+  background-color: #2c2c2e;
+}
+
+.edit-text {
+  color: #0a84ff;
+  font-size: 14px;
+}
+
+.content {
+  height: 436px;
+}
+
+.list {
+  padding: 8px;
+}
+
+.item {
+  flex-direction: row;
+  align-items: center;
+  margin-bottom: 6px;
+  border-radius: 12px;
+  background-color: #1c1c1e;
+}
+
+.delete-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 14px;
+  background-color: #ff453a;
+  justify-content: center;
+  align-items: center;
+  margin-left: 12px;
+}
+
+.delete-icon {
+  color: #fff;
+  font-size: 18px;
+  font-weight: bold;
+}
+
+.item-content {
+  flex: 1;
+  height: 56px;
+  flex-direction: row;
+  align-items: center;
+  padding: 0 12px;
+}
+
+.item-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  justify-content: center;
+  align-items: center;
+  margin-right: 12px;
+}
+
+.icon-text {
+  color: #fff;
+  font-size: 16px;
+  font-weight: bold;
+}
+
+.item-info {
+  flex: 1;
+  flex-direction: column;
+}
+
+.item-name {
+  color: #fff;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.item-url {
+  color: #8e8e93;
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.item-arrow {
+  color: #48484a;
+  font-size: 18px;
+}
+
+.empty {
+  flex: 1;
+  justify-content: center;
+  align-items: center;
+}
+
+.empty-icon {
+  color: #3a3a3c;
+  font-size: 48px;
+  margin-bottom: 12px;
+}
+
+.empty-text {
+  color: #8e8e93;
+  font-size: 16px;
+  margin-bottom: 8px;
+}
+
+.empty-desc {
+  color: #48484a;
+  font-size: 13px;
+}
+
+.toast {
+  position: fixed;
+  bottom: 80px;
+  left: 0;
+  right: 0;
+  justify-content: center;
+  padding: 10px 20px;
+  border-radius: 20px;
+  background-color: rgba(48, 209, 88, 0.95);
+}
+
+.toast-text {
+  color: #fff;
+  font-size: 14px;
+}
+</style>

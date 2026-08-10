@@ -1,0 +1,177 @@
+<template>
+  <div class="page">
+    <div class="header">
+      <div class="back-btn" onclick="goBack">
+        <text class="back-icon">&lt;</text>
+      </div>
+      <text class="title">关于</text>
+    </div>
+
+    <scroll class="content" scroll-y="true">
+      <div class="main">
+        <div class="logo-section">
+          <div class="logo">
+            <text class="logo-text">搜</text>
+          </div>
+          <text class="app-name">{{app.name}}</text>
+          <text class="app-version">{{app.version}}</text>
+        </div>
+
+        <text class="description">{{app.description}}</text>
+
+        <div class="info-section" for="{{section in sections}}">
+          <text class="section-title">{{section.title}}</text>
+          <text class="section-item" for="{{item in section.items}}">{{item}}</text>
+        </div>
+
+        <text class="copyright">{{app.copyright}}</text>
+      </div>
+    </scroll>
+  </div>
+</template>
+
+<script>
+import router from "@system.router"
+
+export default {
+  private: {
+    app: {
+      name: '搜哩浏览器',
+      version: 'v1.0.0',
+      description: '专为智能手表设计的轻量浏览器',
+      copyright: '© 2026 搜哩浏览器'
+    },
+    sections: [
+      {
+        title: '功能特性',
+        items: ['• 网页浏览与解析', '• 自定义键盘输入', '• 离线页面保存', '• 书签收藏管理']
+      },
+      {
+        title: '技术支持',
+        items: ['• 小米Vela快应用框架', '• 智能手表优化适配', '• HTML内容解析渲染']
+      }
+    ]
+  },
+
+  goBack() {
+    router.back()
+  }
+}
+</script>
+
+<style>
+.page {
+  flex-direction: column;
+  height: 480px;
+  background-color: #000;
+}
+
+.header {
+  height: 44px;
+  flex-direction: row;
+  align-items: center;
+  padding: 0 10px;
+  background-color: #1c1c1e;
+}
+
+.back-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 16px;
+  background-color: #2c2c2e;
+  justify-content: center;
+  align-items: center;
+}
+
+.back-icon {
+  color: #0a84ff;
+  font-size: 18px;
+}
+
+.title {
+  flex: 1;
+  text-align: center;
+  color: #fff;
+  font-size: 17px;
+  font-weight: 600;
+  margin-right: 42px;
+}
+
+.content {
+  height: 436px;
+}
+
+.main {
+  flex-direction: column;
+  align-items: center;
+  padding: 20px 16px;
+}
+
+.logo-section {
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.logo {
+  width: 72px;
+  height: 72px;
+  border-radius: 18px;
+  background-color: #0a84ff;
+  justify-content: center;
+  align-items: center;
+}
+
+.logo-text {
+  color: #fff;
+  font-size: 32px;
+  font-weight: bold;
+}
+
+.app-name {
+  color: #fff;
+  font-size: 20px;
+  font-weight: 600;
+  margin-top: 12px;
+}
+
+.app-version {
+  color: #8e8e93;
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+.description {
+  color: #8e8e93;
+  font-size: 14px;
+  margin-bottom: 16px;
+  text-align: center;
+}
+
+.info-section {
+  width: 296px;
+  margin-bottom: 12px;
+  padding: 14px;
+  border-radius: 12px;
+  background-color: #1c1c1e;
+}
+
+.section-title {
+  color: #0a84ff;
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+.section-item {
+  color: #e5e5e7;
+  font-size: 13px;
+  margin-top: 6px;
+}
+
+.copyright {
+  color: #48484a;
+  font-size: 11px;
+  margin-top: 20px;
+}
+</style>

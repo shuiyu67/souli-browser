@@ -1,0 +1,402 @@
+<template>
+  <div class="page">
+    <!-- 顶部搜索区 -->
+    <div class="hero">
+      <div class="logo-circle">
+        <text class="logo-text">S</text>
+      </div>
+      <text class="brand">搜哩浏览器</text>
+      <div class="search-card" onclick="openBrowser">
+        <text class="search-hint">[搜索] 输入网址</text>
+      </div>
+    </div>
+
+    <!-- 快捷入口 -->
+    <div class="quick-section">
+      <div class="quick-grid">
+        <div class="quick-item" for="{{site in quickSites}}" onclick="openUrl(site.url)">
+          <div class="quick-icon" style="background-color: {{site.color}}">
+            <text class="quick-letter">{{site.icon}}</text>
+          </div>
+          <text class="quick-name">{{site.name}}</text>
+        </div>
+      </div>
+    </div>
+
+    <!-- 我的收藏 -->
+    <div class="fav-section" if="{{bookmarks.length > 0}}">
+      <div class="section-header">
+        <text class="section-title">[*] 收藏夹</text>
+        <text class="section-more" onclick="openBookmarks">查看全部</text>
+      </div>
+      <scroll class="fav-scroll" scroll-x="true">
+        <div class="fav-list">
+          <div class="fav-card" for="{{item in bookmarks}}" onclick="openUrl(item.url)">
+            <div class="fav-color" style="background-color: {{item.color}}"></div>
+            <text class="fav-title">{{item.name}}</text>
+            <text class="fav-url">{{formatUrl(item.url)}}</text>
+          </div>
+        </div>
+      </scroll>
+    </div>
+
+    <!-- 功能菜单 -->
+    <div class="menu-section">
+      <div class="menu-grid">
+        <div class="menu-cell" for="{{menu in menus}}" onclick="openMenu($idx)">
+          <div class="menu-icon-wrapper" style="background-color: {{menu.color}}">
+            <text class="menu-icon">{{menu.icon}}</text>
+          </div>
+          <text class="menu-label">{{menu.name}}</text>
+          <div class="badge" if="{{menu.count > 0}}">
+            <text class="badge-text">{{menu.count}}</text>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 底部 -->
+    <div class="footer">
+      <text class="version">搜哩浏览器 v1.0</text>
+    </div>
+  </div>
+</template>
+
+<script>
+import router from "@system.router"
+import storage from "@system.storage"
+import { getStorageData, formatDisplayUrl } from "../../common/utils.js"
+
+const QUICK_SITES = [
+  { name: '百度', url: 'https://m.baidu.com', icon: 'B', color: '#2932e1' },
+  { name: '必应', url: 'https://m.bing.com', icon: 'Bi', color: '#008373' },
+  { name: 'B站', url: 'https://m.bilibili.com', icon: 'Bi', color: '#fb7299' },
+  { name: '微博', url: 'https://m.weibo.cn', icon: 'W', color: '#e6162d' }
+]
+
+export default {
+  private: {
+    bookmarks: [],
+    bookmarkCount: 0,
+    offlineCount: 0,
+    quickSites: QUICK_SITES,
+    menus: []
+  },
+
+  onInit() {
+    this.updateMenus()
+  },
+
+  onShow() {
+    this.loadData()
+  },
+
+  async loadData() {
+    const bookmarks = await getStorageData(storage, 'user_bookmarks')
+    this.bookmarks = bookmarks.slice(0, 5).map(b => ({
+      ...b,
+      color: b.color || this.getRandomColor(),
+      icon: b.icon || b.name.charAt(0).toUpperCase()
+    }))
+    this.bookmarkCount = bookmarks.length
+
+    const pages = await getStorageData(storage, 'offline_pages')
+    this.offlineCount = pages.length
+    this.updateMenus()
+  },
+
+  updateMenus() {
+    this.menus = [
+      { name: '收藏夹', icon: '*', color: '#0a84ff', action: 'openBookmarks', count: this.bookmarkCount },
+      { name: '离线页', icon: '=', color: '#30d158', action: 'openOffline', count: this.offlineCount },
+      { name: '设置', icon: '#', color: '#bf5af2', action: 'openSettings', count: 0 },
+      { name: '关于', icon: 'i', color: '#8e8e93', action: 'openAbout', count: 0 }
+    ]
+  },
+
+  getRandomColor() {
+    const colors = ['#0a84ff', '#30d158', '#ff375f', '#ff9f0a', '#bf5af2', '#64d2ff']
+    return colors[Math.floor(Math.random() * colors.length)]
+  },
+
+  formatUrl(url) {
+    return formatDisplayUrl(url)
+  },
+
+  openBrowser() {
+    router.push({ uri: 'pages/index' })
+  },
+
+  openBookmarks() {
+    router.push({ uri: 'pages/detail' })
+  },
+
+  openOffline() {
+    router.push({ uri: 'pages/offline' })
+  },
+
+  openAbout() {
+    router.push({ uri: 'pages/about' })
+  },
+
+  openSettings() {
+    router.push({ uri: 'pages/settings' })
+  },
+
+  openMenu(index) {
+    const menu = this.menus[index]
+    if (!menu) return
+    
+    switch (menu.action) {
+      case 'openBookmarks':
+        this.openBookmarks()
+        break
+      case 'openOffline':
+        this.openOffline()
+        break
+      case 'openSettings':
+        this.openSettings()
+        break
+      case 'openAbout':
+        this.openAbout()
+        break
+    }
+  },
+
+  openUrl(url) {
+    if (url) router.push({ uri: 'pages/index', params: { url } })
+  }
+}
+</script>
+
+<style>
+.page {
+  flex-direction: column;
+  height: 480px;
+  background-color: #0a0a0a;
+}
+
+/* 顶部区域 */
+.hero {
+  padding: 24px 20px 20px;
+  align-items: center;
+}
+
+.logo-circle {
+  width: 64px;
+  height: 64px;
+  border-radius: 20px;
+  background-color: #0a84ff;
+  justify-content: center;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.logo-text {
+  color: #ffffff;
+  font-size: 32px;
+  font-weight: 700;
+}
+
+.brand {
+  color: #ffffff;
+  font-size: 20px;
+  font-weight: 700;
+  margin-bottom: 16px;
+  letter-spacing: 1px;
+}
+
+.search-card {
+  width: 280px;
+  height: 44px;
+  background-color: #1c1c1e;
+  border-radius: 22px;
+  border: 1px solid #2c2c2e;
+  justify-content: center;
+  align-items: center;
+}
+
+.search-hint {
+  color: #8e8e93;
+  font-size: 14px;
+}
+
+/* 快捷入口 */
+.quick-section {
+  padding: 0 16px;
+  margin-bottom: 20px;
+}
+
+.quick-grid {
+  flex-direction: row;
+  justify-content: space-between;
+}
+
+.quick-item {
+  width: 68px;
+  align-items: center;
+}
+
+.quick-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+  justify-content: center;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.quick-letter {
+  color: #ffffff;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.quick-name {
+  color: #98989d;
+  font-size: 11px;
+}
+
+/* 收藏夹 */
+.fav-section {
+  margin-bottom: 20px;
+}
+
+.section-header {
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 20px;
+  margin-bottom: 12px;
+}
+
+.section-title {
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.section-more {
+  color: #0a84ff;
+  font-size: 12px;
+}
+
+.fav-scroll {
+  height: 90px;
+}
+
+.fav-list {
+  flex-direction: row;
+  padding: 0 16px;
+}
+
+.fav-card {
+  width: 140px;
+  height: 80px;
+  background-color: #1c1c1e;
+  border-radius: 12px;
+  padding: 12px;
+  margin-right: 10px;
+  flex-direction: column;
+  justify-content: flex-end;
+  border: 1px solid #2c2c2e;
+}
+
+.fav-color {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 4px;
+  height: 100%;
+  border-top-left-radius: 12px;
+  border-bottom-left-radius: 12px;
+}
+
+.fav-title {
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 4px;
+  lines: 1;
+  text-overflow: ellipsis;
+}
+
+.fav-url {
+  color: #8e8e93;
+  font-size: 10px;
+  lines: 1;
+  text-overflow: ellipsis;
+}
+
+/* 功能菜单 */
+.menu-section {
+  padding: 0 16px;
+  margin-bottom: 16px;
+}
+
+.menu-grid {
+  flex-direction: row;
+  justify-content: space-between;
+}
+
+.menu-cell {
+  width: 96px;
+  height: 80px;
+  background-color: #1c1c1e;
+  border-radius: 16px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #2c2c2e;
+}
+
+.menu-icon-wrapper {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  justify-content: center;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.menu-icon {
+  color: #ffffff;
+  font-size: 18px;
+}
+
+.menu-label {
+  color: #98989d;
+  font-size: 12px;
+}
+
+.badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  min-width: 18px;
+  height: 18px;
+  background-color: #ff375f;
+  border-radius: 9px;
+  justify-content: center;
+  align-items: center;
+  padding: 0 5px;
+}
+
+.badge-text {
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+/* 底部 */
+.footer {
+  flex: 1;
+  justify-content: flex-end;
+  align-items: center;
+  padding-bottom: 12px;
+}
+
+.version {
+  color: #3a3a3c;
+  font-size: 11px;
+}
+</style>

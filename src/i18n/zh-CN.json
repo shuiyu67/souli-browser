@@ -1,0 +1,56 @@
+{
+  "app": {
+    "name": "搜哩浏览器",
+    "version": "v1.0.0",
+    "description": "专为智能手表设计的轻量浏览器"
+  },
+  "common": {
+    "confirm": "确定",
+    "cancel": "取消",
+    "back": "返回",
+    "save": "保存",
+    "delete": "删除",
+    "edit": "编辑",
+    "done": "完成",
+    "loading": "加载中",
+    "empty": "暂无内容",
+    "retry": "重试",
+    "close": "关闭"
+  },
+  "home": {
+    "searchPlaceholder": "搜索或输入网址",
+    "bookmarks": "我的收藏",
+    "shortcuts": "常用网站",
+    "functions": "功能",
+    "viewAll": "全部"
+  },
+  "browser": {
+    "inputUrl": "输入网址",
+    "startBrowsing": "开始浏览",
+    "enterUrlHint": "点击上方输入网址",
+    "loading": "加载中",
+    "loadFailed": "获取失败",
+    "networkError": "网络错误，请检查连接",
+    "noContent": "页面无内容或格式不支持",
+    "saveSuccess": "保存成功",
+    "saveFailed": "保存失败",
+    "noContentToSave": "无内容可保存"
+  },
+  "bookmarks": {
+    "title": "收藏夹",
+    "empty": "暂无收藏",
+    "emptyHint": "浏览网页时点击收藏按钮添加",
+    "deleted": "已删除"
+  },
+  "offline": {
+    "title": "离线页面",
+    "empty": "暂无离线页面",
+    "emptyHint": "浏览网页时选择保存离线页面",
+    "elements": "个元素"
+  },
+  "about": {
+    "title": "关于",
+    "features": "功能特性",
+    "tech": "技术支持"
+  }
+}

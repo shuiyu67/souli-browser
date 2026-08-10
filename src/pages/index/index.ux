@@ -1,0 +1,1431 @@
+<template>
+  <div class="page">
+    <!-- 导航栏 -->
+    <div class="navbar">
+      <div class="nav-back" onclick="goBack">
+        <text class="icon-back">&lt;</text>
+      </div>
+      <div class="nav-input" onclick="showKeyboard">
+        <text class="input-text">{{navInputText}}</text>
+      </div>
+      <div class="nav-go" onclick="confirmInput">
+        <text class="icon-go">&gt;</text>
+      </div>
+    </div>
+
+    <!-- 内容区 -->
+    <div class="content-area">
+      <!-- 加载状态 -->
+      <div class="status-loading" if="{{isLoading}}">
+        <div class="spinner"></div>
+        <text class="loading-text">加载中...</text>
+      </div>
+
+      <!-- 错误状态 -->
+      <div class="status-error" if="{{errorMsg && !isLoading}}">
+        <text class="error-icon">!</text>
+        <text class="error-text">{{errorMsg}}</text>
+        <div class="btn-retry" onclick="refreshPage">
+          <text class="btn-text">重试</text>
+        </div>
+      </div>
+
+      <!-- 空状态 -->
+      <div class="status-empty" if="{{!currentUrl && !isLoading && !errorMsg}}" onclick="showKeyboard">
+        <text class="empty-icon">WWW</text>
+        <text class="empty-title">开始浏览</text>
+        <div class="empty-input-btn">
+          <text class="empty-input-text">点击输入网址</text>
+        </div>
+      </div>
+
+      <!-- 网页内容 - 单一有序 blocks（按文档真实位置排序），单一结构 for 渲染（Vela 可靠） -->
+      <scroll class="web-content"
+              if="{{!isLoading && !errorMsg && blocks.length > 0}}"
+              scroll-y="true">
+        <text class="page-title" if="{{pageTitle}}">{{pageTitle}}</text>
+        <!-- 统一内容流：文本/链接/图片/表单字段按 _index 交错；图片用单分支 if 渲染，行内用 span for 混排 -->
+        <div class="block {{b.boxCls}}" for="{{b in blocks}}" onclick="onBlockClick(b)">
+          <image if="{{b.kind === 'image'}}" class="img-content" src="{{b.imgSrc}}"></image>
+          <text if="{{b.kind !== 'image'}}" class="{{b.textCls}}" style="{{b.color ? 'color: ' + b.color : ''}}" lines="0">
+            <span for="{{run in b.runs}}" class="{{run.cls}}" style="{{run.color ? 'color: ' + run.color : ''}}">{{run.text}}</span>
+          </text>
+        </div>
+      </scroll>
+    </div>
+
+    <!-- 底部工具栏 -->
+    <div class="toolbar">
+      <div class="tool-btn {{canGoBack ? '' : 'disabled'}}" onclick="goBackHistory">
+        <text class="tool-icon">&lt;</text>
+      </div>
+      <div class="tool-btn {{canGoForward ? '' : 'disabled'}}" onclick="goForward">
+        <text class="tool-icon">&gt;</text>
+      </div>
+      <div class="tool-btn primary" onclick="refreshPage">
+        <text class="primary-icon">R</text>
+      </div>
+      <div class="tool-btn" onclick="savePage">
+        <text class="tool-icon">*</text>
+      </div>
+      <div class="tool-btn" onclick="addBookmark">
+        <text class="tool-icon">★</text>
+      </div>
+      <div class="tool-btn" onclick="goHome">
+        <text class="tool-icon">H</text>
+      </div>
+    </div>
+
+    <!-- 键盘（改为常规 flex 流元素，去掉 position:fixed，避免 navbar 被遮挡/错位） -->
+    <div class="keyboard" if="{{keyboardVisible}}">
+      <div class="kb-display">
+        <text class="kb-input">{{inputText}}_</text>
+        <div class="kb-actions">
+          <div class="kb-done" onclick="hideKeyboard">
+            <text class="kb-done-text">完成</text>
+          </div>
+          <div class="kb-delete" onclick="deleteChar">
+            <text class="kb-del-icon">X</text>
+          </div>
+        </div>
+      </div>
+      <div class="kb-row" for="{{row in keyRows}}">
+        <text class="kb-key {{k === ' ' ? 'kb-space' : ''}}" for="{{k in row}}" onclick="typeChar(k)">{{k}}</text>
+      </div>
+      <div class="kb-row">
+        <text class="kb-key kb-wide" onclick="typeChar('.')">.</text>
+        <text class="kb-key" onclick="typeChar('-')">-</text>
+        <text class="kb-key" onclick="typeChar('/')">/</text>
+        <text class="kb-key" onclick="typeChar(':')">:</text>
+        <text class="kb-key kb-space" onclick="typeChar(' ')">空格</text>
+      </div>
+    </div>
+
+    <!-- 图片预览 -->
+    <div class="image-modal" if="{{showImageModal}}" onclick="closeImageModal">
+      <image class="modal-image" src="{{currentImage.thumbUrl}}" />
+      <text class="modal-url">{{currentImage.url}}</text>
+      <div class="modal-close" onclick="closeImageModal">
+        <text class="close-text">关闭</text>
+      </div>
+    </div>
+
+    <!-- Toast -->
+    <div class="toast" if="{{showToast}}">
+      <text class="toast-text">{{toastMsg}}</text>
+    </div>
+  </div>
+</template>
+
+<script>
+import router from "@system.router"
+import fetch from "@system.fetch"
+import storage from "@system.storage"
+import {
+  decodeHtmlEntities, cleanHtmlText, getBaseUrl, resolveUrl,
+  preprocessHtml, extractTitle, parseInlineElements,
+  formatDisplayUrl, normalizeUrl, truncateText, generateId
+} from "../../common/utils.js"
+
+/**
+ * HTML解析器
+ */
+// ==================== 自研渲染内核：递归 DOM 遍历解析器 ====================
+// Vela 无 webview，故自研内核：把 HTML 解析为 DOM 树，深度优先遍历，
+// 下钻所有容器（div/section/article/main/header/footer/aside/nav/ul/ol/li...），
+// 按文档真实位置产出归一化元素，供 renderBlocks 渲染。
+// 相比旧版"正则扁平提取"，本版不再丢弃含子标签的容器，显著减少元素丢失。
+
+const VOID_TAGS = new Set(['img', 'br', 'hr', 'input', 'meta', 'link', 'area', 'base', 'col', 'embed', 'param', 'source', 'track', 'wbr'])
+const INLINE_TAGS = new Set(['a', 'b', 'i', 'strong', 'em', 'span', 'font', 'u', 's', 'strike', 'sub', 'sup', 'code', 'small', 'big', 'mark', 'label', 'time', 'abbr', 'cite', 'q', 'kbd', 'var', 'del', 'ins', 'bdi', 'bdo'])
+const BLOCK_TAGS = new Set(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'div', 'section', 'article', 'main', 'header', 'footer', 'aside', 'nav', 'li', 'ul', 'ol', 'dl', 'dt', 'dd', 'blockquote', 'pre', 'table', 'form', 'figure', 'figcaption', 'address', 'details', 'summary'])
+
+function parseAttrs(tagStr) {
+  const attrs = {}
+  const re = /([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*("([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/g
+  let m
+  while ((m = re.exec(tagStr))) {
+    const name = m[1].toLowerCase()
+    attrs[name] = m[3] !== undefined ? m[3] : (m[4] !== undefined ? m[4] : m[5])
+  }
+  return attrs
+}
+
+function buildTree(html) {
+  const root = { tag: '#root', children: [], start: 0 }
+  const stack = [root]
+  let i = 0
+  const len = html.length
+  while (i < len) {
+    if (html[i] === '<') {
+      if (html.startsWith('<!--', i)) { const e = html.indexOf('-->', i); i = e === -1 ? len : e + 3; continue }
+      if (html[i + 1] === '/') {
+        const e = html.indexOf('>', i)
+        if (e === -1) break
+        const name = html.slice(i + 2, e).replace(/[^a-zA-Z0-9]/g, '').toLowerCase()
+        for (let s = stack.length - 1; s > 0; s--) {
+          if (stack[s].tag === name) { stack.length = s; break }
+        }
+        i = e + 1
+        continue
+      }
+      if (html[i + 1] === '!' || html[i + 1] === '?') { const e = html.indexOf('>', i); i = e === -1 ? len : e + 1; continue }
+      const e = html.indexOf('>', i)
+      if (e === -1) break
+      let tagStr = html.slice(i + 1, e)
+      const selfClose = tagStr.endsWith('/')
+      tagStr = tagStr.replace(/\/\s*$/, '')
+      const sp = tagStr.match(/^([a-zA-Z][a-zA-Z0-9]*)/)
+      const name = sp ? sp[1].toLowerCase() : ''
+      const attrs = parseAttrs(tagStr)
+      if (name) {
+        const node = { tag: name, attrs, children: [], start: i, parent: stack[stack.length - 1] }
+        stack[stack.length - 1].children.push(node)
+        if (!VOID_TAGS.has(name) && !selfClose) stack.push(node)
+      }
+      i = e + 1
+      continue
+    } else {
+      const n = html.indexOf('<', i)
+      const text = html.slice(i, n === -1 ? len : n)
+      const decoded = decodeHtmlEntities(text)
+      if (decoded.trim()) {
+        stack[stack.length - 1].children.push({ tag: '#text', text: decoded, start: i })
+      }
+      i = n === -1 ? len : n
+    }
+  }
+  return root
+}
+
+class HtmlParser {
+  constructor(baseUrl) {
+    this.baseUrl = baseUrl
+    this.elements = []
+  }
+
+  parse(html) {
+    const content = preprocessHtml(html)
+    if (!content) return []
+    const tree = buildTree(content)
+    this.walk(tree)
+    if (this.elements.length === 0) {
+      const m = content.match(/>([^<]{20,})</)
+      if (m) this.elements.push({ type: 'p', parts: [{ type: 'text', text: cleanHtmlText(m[1]) }], _index: 0 })
+    }
+    return this.elements.sort((a, b) => a._index - b._index)
+  }
+
+  // 收集节点的行内 HTML：文本 + 内联标签子树；遇到块级标签停止（块级由递归单独产出）
+  collectInlineHtml(node) {
+    let out = ''
+    for (const c of node.children) {
+      if (c.tag === '#text') out += c.text
+      else if (c.tag === 'br') out += '\n'
+      else if (INLINE_TAGS.has(c.tag)) {
+        const attrStr = Object.keys(c.attrs).map(k => ' ' + k + '="' + c.attrs[k] + '"').join('')
+        out += '<' + c.tag + attrStr + '>' + this.collectInlineHtml(c) + '</' + c.tag + '>'
+      }
+    }
+    return out
+  }
+
+  collectText(node) {
+    let out = ''
+    for (const c of node.children) {
+      if (c.tag === '#text') out += c.text
+      else out += this.collectText(c)
+    }
+    return out
+  }
+
+  isInsideForm(node) {
+    let p = node.parent
+    while (p) { if (p.tag === 'form') return true; p = p.parent }
+    return false
+  }
+
+  emitStandaloneInput(node) {
+    if (this.isInsideForm(node)) return
+    const itype = (node.attrs.type || 'text').toLowerCase()
+    if (['submit', 'button', 'hidden', 'checkbox', 'radio', 'file', 'image', 'reset'].includes(itype)) return
+    const name = node.attrs.name || ''
+    const placeholder = decodeHtmlEntities(node.attrs.placeholder || '')
+    let value = decodeHtmlEntities(node.attrs.value || '')
+    const isTextarea = node.tag === 'textarea'
+    if (isTextarea) value = decodeHtmlEntities(this.collectText(node))
+    const gid = 'i' + node.start
+    this.elements.push({
+      type: 'form', action: '', method: 'get',
+      fields: [{ name: name || ('field' + node.start), placeholder, value, isTextarea, itype: itype === 'password' ? 'password' : 'text' }],
+      submitText: '', gid, _index: node.start
+    })
+  }
+
+  emitForm(node) {
+    const action = node.attrs.action || ''
+    const method = (node.attrs.method || 'get').toLowerCase()
+    const fields = []
+    const collect = (n) => {
+      for (const c of n.children) {
+        if (c.tag === 'input') {
+          const itype = (c.attrs.type || 'text').toLowerCase()
+          if (['submit', 'button', 'hidden', 'checkbox', 'radio', 'file', 'image', 'reset'].includes(itype)) continue
+          const name = c.attrs.name || ''
+          if (!name) continue
+          fields.push({ name, placeholder: decodeHtmlEntities(c.attrs.placeholder || ''), value: decodeHtmlEntities(c.attrs.value || ''), isTextarea: false, itype: itype === 'password' ? 'password' : 'text' })
+        } else if (c.tag === 'textarea') {
+          const name = c.attrs.name || ''
+          if (!name) continue
+          fields.push({ name, placeholder: decodeHtmlEntities(c.attrs.placeholder || ''), value: decodeHtmlEntities(this.collectText(c)), isTextarea: true, itype: 'text' })
+        } else if (c.tag !== '#text') collect(c)
+      }
+    }
+    collect(node)
+    if (fields.length === 0) return
+    let submitText = '提交'
+    const findBtn = (n) => {
+      for (const c of n.children) {
+        if (c.tag === 'input' && (c.attrs.type || '').toLowerCase() === 'submit' && c.attrs.value) return decodeHtmlEntities(c.attrs.value)
+        if (c.tag === 'button') { const t = cleanHtmlText(this.collectText(c)); if (t) return t }
+        if (c.tag !== '#text') { const r = findBtn(c); if (r) return r }
+      }
+      return null
+    }
+    const st = findBtn(node)
+    if (st) submitText = st
+    const gid = 'f' + node.start
+    this.elements.push({ type: 'form', action: resolveUrl(action, this.baseUrl), method, fields, submitText, gid, _index: node.start })
+  }
+
+  emitTable(node) {
+    const rows = []
+    const walkRows = (n) => {
+      for (const c of n.children) {
+        if (c.tag === 'tr') {
+          const cells = []
+          for (const cc of c.children) {
+            if (cc.tag === 'td' || cc.tag === 'th') cells.push(cleanHtmlText(this.collectInlineHtml(cc)))
+          }
+          if (cells.length) rows.push(cells.join(' | '))
+        } else if (c.tag !== '#text') walkRows(c)
+      }
+    }
+    walkRows(node)
+    if (rows.length === 0) return
+    this.elements.push({ type: 'p', parts: [{ type: 'text', text: rows.join('\n') }], _index: node.start })
+  }
+
+  // 主遍历：处理特殊叶子/独立标签，块级标签交给 walkBlock（带行内缓冲，保证与块级兄弟正确交错）
+  walk(node) {
+    for (const child of node.children) {
+      if (child.tag === '#text') continue
+      const tag = child.tag
+      if (tag === 'img') {
+        const src = child.attrs.src || child.attrs['data-src'] || ''
+        const alt = child.attrs.alt || ''
+        if (src) this.elements.push({ type: 'img', url: resolveUrl(src, this.baseUrl), thumbUrl: resolveUrl(src, this.baseUrl), alt: decodeHtmlEntities(alt), _index: child.start })
+        continue
+      }
+      if (tag === 'hr') { this.elements.push({ type: 'hr', _index: child.start }); continue }
+      if (tag === 'input' || tag === 'textarea') { this.emitStandaloneInput(child); continue }
+      if (tag === 'form') { this.emitForm(child); continue }
+      if (tag === 'table') { this.emitTable(child); continue }
+      if (tag === 'pre') {
+        const t = cleanHtmlText(this.collectText(child))
+        if (t) this.elements.push({ type: 'pre', text: t, _index: child.start })
+        continue
+      }
+      if (tag === 'a') {
+        // 仅顶层（直接挂在 #root 下）的链接单独成块；其余交给外层块的行内混排收集
+        if (node.tag === '#root') {
+          const text = cleanHtmlText(this.collectInlineHtml(child))
+          const href = child.attrs.href || ''
+          if (text && href) this.elements.push({ type: 'a', url: resolveUrl(href, this.baseUrl), parts: [{ type: 'text', text }], _index: child.start })
+        }
+        continue
+      }
+      if (BLOCK_TAGS.has(tag)) { this.walkBlock(child); continue }
+      // 未知标签：当作容器递归，避免内容丢失
+      this.walk(child)
+    }
+  }
+
+  // 块级标签遍历：行内文本/内联标签累积成缓冲，遇到块级子节点时先 flush 已累积行内内容，
+  // 再递归处理块级子节点，从而保持"文字 + 段落 + 文字"在文档中的正确交错顺序。
+  walkBlock(node) {
+    const type = (node.tag === 'li') ? 'li' : (node.tag === 'blockquote' ? 'blockquote' : 'p')
+    let buffer = ''
+    let bufferStart = node.start
+    const flush = () => {
+      if (!buffer.trim()) { buffer = ''; return }
+      const parts = parseInlineElements(buffer, this.baseUrl)
+      if (parts.length) this.elements.push({ type, parts, _index: bufferStart })
+      buffer = ''
+    }
+    for (const child of node.children) {
+      if (child.tag === '#text') { if (!buffer) bufferStart = child.start; buffer += child.text; continue }
+      const tag = child.tag
+      const isBlockLike = BLOCK_TAGS.has(tag) || tag === 'table' || tag === 'form' || tag === 'img' ||
+        tag === 'input' || tag === 'textarea' || tag === 'pre' || tag === 'hr'
+      if (isBlockLike) {
+        flush()
+        this.walk(child)
+      } else if (tag === 'a' || INLINE_TAGS.has(tag)) {
+        if (!buffer) bufferStart = child.start
+        const attrStr = Object.keys(child.attrs).map(k => ' ' + k + '="' + child.attrs[k] + '"').join('')
+        buffer += '<' + tag + attrStr + '>' + this.collectInlineHtml(child) + '</' + tag + '>'
+      } else {
+        // 未知内联式标签：取其行内内容并入缓冲
+        if (!buffer) bufferStart = child.start
+        buffer += this.collectInlineHtml(child)
+      }
+    }
+    flush()
+  }
+}
+
+export default {
+  protected: { url: '', tempId: '' },
+
+  private: {
+    currentUrl: '',
+    pageTitle: '',
+    htmlElements: [],
+    blocks: [],
+    formData: {},
+    forms: {},
+    historyUrls: [],
+    historyIndex: -1,
+    isLoading: false,
+    errorMsg: '',
+    // ===== 服务器端 JS 渲染代理（Vela 无 webview，SPA 站点需服务器执行 JS 后回传 HTML）=====
+    useProxy: false,                      // 默认直连优先：普通站点无需验证码即可浏览；开启后优先走 JS 渲染代理
+    proxyBase: 'https://cdn.yhdet.top:8443/render',  // 北京 CDN nginx:8443 反代到 8500（cdn.yhdet.top 专属证书，TLS 校验通过）
+    proxyToken: '',                       // 从本机存储读取（设置页写入），留空则提示去设置页填入
+    inputText: '',
+    keyboardVisible: false,
+    keyboardMode: 'url',
+    activeGid: '',
+    activeField: '',
+    keyRows: [
+      ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'],
+      ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L'],
+      ['Z', 'X', 'C', 'V', 'B', 'N', 'M']
+    ],
+    showImageModal: false,
+    currentImage: null,
+    showToast: false,
+    toastMsg: ''
+  },
+
+  computed: {
+    displayUrl() { return formatDisplayUrl(this.currentUrl) },
+    navInputText() { return this.inputText || this.displayUrl || '输入网址' },
+    canGoBack() { return this.historyIndex > 0 },
+    canGoForward() { return this.historyIndex < this.historyUrls.length - 1 }
+  },
+
+  onInit() {
+    console.log('Index onInit, url:', this.url, 'tempId:', this.tempId)
+  },
+
+  onReady() {
+    console.log('Index onReady, url:', this.url, 'tempId:', this.tempId)
+    // 代理验证码与开关存于本机 storage（设置页写入）。两者都读完后才开始加载，
+    // 避免异步竞态导致 useProxy 还没读到就发请求。
+    let pending = 2
+    const start = () => {
+      if (--pending > 0) return
+      if (this.tempId) {
+        this.loadOfflineData(this.tempId)
+      } else if (this.url) {
+        this.inputText = this.url
+        this.loadUrl(this.url)
+      } else if (!this.proxyToken) {
+        this.showToast('提示：渲染 JS 站点需在设置中填入代理验证码')
+      }
+    }
+    storage.get({
+      key: 'proxy_token',
+      success: (data) => { this.proxyToken = data || ''; start() },
+      fail: () => { start() }
+    })
+    storage.get({
+      key: 'use_proxy',
+      success: (data) => { this.useProxy = (data === 'true' || data === true); start() },
+      fail: () => { start() }
+    })
+  },
+
+  loadOfflineData(tempId) {
+    storage.get({
+      key: tempId,
+      success: (data) => {
+        try {
+          const offline = JSON.parse(data)
+          this.pageTitle = offline.title || ''
+          this.currentUrl = offline.url || ''
+          this.inputText = offline.url || ''
+          this.htmlElements = offline.elements || []
+          this.renderBlocks(this.htmlElements)
+          storage.delete({ key: tempId })
+        } catch (e) {
+          this.errorMsg = '加载失败'
+        }
+      },
+      fail: () => this.errorMsg = '加载失败'
+    })
+  },
+
+  goBack() { router.back() },
+  goHome() { router.push({ uri: 'pages/home' }) },
+  
+  goBackHistory() {
+    if (this.historyIndex > 0) {
+      this.historyIndex--
+      this.loadUrl(this.historyUrls[this.historyIndex])
+    } else {
+      router.back()
+    }
+  },
+
+  goForward() {
+    if (this.historyIndex < this.historyUrls.length - 1) {
+      this.historyIndex++
+      this.loadUrl(this.historyUrls[this.historyIndex])
+    }
+  },
+
+  showKeyboard() {
+    this.keyboardMode = 'url'
+    if (this.currentUrl && !this.inputText) this.inputText = this.currentUrl
+    this.keyboardVisible = true
+  },
+
+  // 点击网页输入框 -> 打开自研键盘，预填当前值，进入「字段模式」
+  focusWebField(gid, name) {
+    this.keyboardMode = 'field'
+    this.activeGid = gid
+    this.activeField = name
+    const cur = (this.formData[gid] && this.formData[gid][name]) || ''
+    this.inputText = cur
+    this.keyboardVisible = true
+  },
+
+  // 关闭键盘：字段模式则把输入写回对应表单字段并刷新流中显示
+  hideKeyboard() {
+    if (this.keyboardMode === 'field' && this.activeGid && this.activeField) {
+      const val = this.inputText
+      if (!this.formData[this.activeGid]) this.formData[this.activeGid] = {}
+      this.formData[this.activeGid][this.activeField] = val
+      // 刷新流中对应字段块的显示
+      this.blocks = this.blocks.map(b => {
+        if (b.kind === 'field' && b.gid === this.activeGid && b.fieldName === this.activeField) {
+          const hasVal = !!(val && val.length)
+          const placeholder = (b.runs[0] && b.runs[0].text) || '输入'
+          return Object.assign({}, b, {
+            runs: [{ text: hasVal ? val : placeholder, cls: hasVal ? 'web-field-text' : 'web-field-placeholder' }]
+          })
+        }
+        return b
+      })
+      this.activeGid = ''
+      this.activeField = ''
+      this.keyboardMode = 'url'
+    }
+    this.keyboardVisible = false
+  },
+
+  typeChar(char) { this.inputText += char },
+  deleteChar() { this.inputText = this.inputText.slice(0, -1) },
+
+  confirmInput() {
+    if (this.keyboardMode === 'field') { this.hideKeyboard(); return }
+    const url = normalizeUrl(this.inputText)
+    if (!url) {
+      this.showToast('请输入有效网址')
+      return
+    }
+    this.keyboardVisible = false
+    this.loadUrl(url)
+  },
+
+  loadUrl(url) {
+    this.currentUrl = url
+    this.isLoading = true
+    this.errorMsg = ''
+
+    if (this.historyIndex < this.historyUrls.length - 1) {
+      this.historyUrls = this.historyUrls.slice(0, this.historyIndex + 1)
+    }
+    this.historyUrls.push(url)
+    this.historyIndex = this.historyUrls.length - 1
+
+    // 默认「直连优先」：普通静态/SSR 站点无需代理、无需验证码即可正常浏览。
+    // 仅当显式开启「JS 渲染代理」且已填验证码时，才优先走服务器渲染代理。
+    if (this.useProxy && this.proxyToken) {
+      this._fetchViaProxy(url, true)
+    } else {
+      this._loadDirectFirst(url)
+    }
+  },
+
+  // 直连优先：先直连目标站；若页面无内容（多为 SPA 壳页面）且本机已存验证码，
+  // 则自动升级走 JS 渲染代理——JS 解析作为额外功能按需触发，不影响正常访问。
+  _loadDirectFirst(url) {
+    fetch.fetch({
+      url,
+      method: 'GET',
+      responseType: 'text',
+      header: { 'User-Agent': 'Mozilla/5.0 (compatible; WatchBrowser/1.0)' },
+      success: (res) => {
+        const code = res.code || res.statusCode || 0
+        let data = res.data
+        if (data && typeof data !== 'string') {
+          try { data = JSON.stringify(data) } catch (e) { data = String(data) }
+        }
+        if (code === 200 && data) {
+          const n = this.parseHtml(data)
+          if (n === 0 && this.proxyToken) {
+            // 直连拿到的是 SPA 空壳 -> 升级走 JS 渲染代理（额外功能）
+            this._fetchViaProxy(url, false)
+            return
+          }
+          if (n === 0) {
+            this.errorMsg = '该页面需 JS 渲染，请在设置中填入代理验证码并启用'
+          }
+          this.isLoading = false
+        } else if (this.proxyToken) {
+          this._fetchViaProxy(url, false)
+        } else {
+          this.errorMsg = `请求失败：HTTP ${code}`
+          this.isLoading = false
+        }
+      },
+      fail: (err) => {
+        if (this.proxyToken) this._fetchViaProxy(url, false)
+        else this.handleError(err)
+      }
+    })
+  },
+
+  // 经服务器 JS 渲染代理获取（Vela 无 webview，SPA 站点需服务器执行 JS 后回传 HTML）
+  _fetchViaProxy(url, fallbackToDirect) {
+    const proxyUrl = this.proxyBase + '?url=' + encodeURIComponent(url) +
+      '&token=' + encodeURIComponent(this.proxyToken) + '&mode=body'
+    fetch.fetch({
+      url: proxyUrl,
+      method: 'GET',
+      responseType: 'text',
+      header: { 'User-Agent': 'Mozilla/5.0 (compatible; WatchBrowser/1.0)' },
+      success: (res) => {
+        const code = res.code || res.statusCode || 0
+        let data = res.data
+        if (data && typeof data !== 'string') {
+          try { data = JSON.stringify(data) } catch (e) { data = String(data) }
+        }
+        if (code === 200 && data) {
+          this.parseHtml(data)
+          this.isLoading = false
+        } else if (fallbackToDirect) {
+          // 代理不可用（验证码错误/过期等）-> 回退直连，至少看静态内容，不卡在 401
+          this._loadDirect(url)
+        } else {
+          this.errorMsg = 'JS 渲染代理不可用（验证码可能错误），已尝试直连'
+          this.isLoading = false
+        }
+      },
+      fail: () => {
+        if (fallbackToDirect) this._loadDirect(url)
+        else { this.errorMsg = 'JS 渲染代理连接失败，已尝试直连'; this.isLoading = false }
+      }
+    })
+  },
+
+  // 直连目标站（代理不可用时的兜底）
+  _loadDirect(url) {
+    this._fetchUrl(url, (err) => this.handleError(err))
+  },
+
+  // 统一 fetch 封装
+  _fetchUrl(url, onFail) {
+    fetch.fetch({
+      url,
+      method: 'GET',
+      responseType: 'text',
+      header: { 'User-Agent': 'Mozilla/5.0 (compatible; WatchBrowser/1.0)' },
+      success: (res) => this.handleSuccess(res),
+      fail: (err) => onFail(err)
+    })
+  },
+
+  handleSuccess(response) {
+    const code = response.code || response.statusCode || 0
+    let data = response.data
+    if (data && typeof data !== 'string') {
+      try { data = JSON.stringify(data) } catch (e) { data = String(data) }
+    }
+    if (code === 200 && data) {
+      const n = this.parseHtml(data)
+      if (n === 0) {
+        this.errorMsg = this.proxyToken
+          ? '页面无内容'
+          : '该页面需 JS 渲染，请在设置中填入代理验证码并启用'
+      }
+    } else {
+      this.errorMsg = `请求失败：HTTP ${code}`
+    }
+    this.isLoading = false
+  },
+
+  handleError(err) {
+    let msg = '网络错误'
+    if (err) {
+      if (err.message) msg = err.message
+      else if (err.data) msg = String(err.data)
+      else if (typeof err === 'string') msg = err
+    }
+    this.errorMsg = '请求失败：' + msg
+    this.isLoading = false
+  },
+
+  parseHtml(html) {
+    this.pageTitle = extractTitle(html) || this.displayUrl
+    const parser = new HtmlParser(getBaseUrl(this.currentUrl))
+    this.htmlElements = parser.parse(html)
+    this.renderBlocks(this.htmlElements)
+    return this.htmlElements.length
+  },
+
+  /**
+   * 底层渲染：把 parser 产出的元素转成单一有序 blocks 数组，按文档真实位置 (_index) 排序。
+   * 所有非图片块用 runs（行内片段数组）渲染，模板用 text 内 span for 实现行内混排；
+   * 图片块用 image 组件（单分支 if）。点击在 JS 层分流，避免在 for 内写多分支 if。
+   */
+  renderBlocks(elements) {
+    const blocks = []
+    this.formData = {}
+    this.forms = {}
+    for (const e of (elements || [])) {
+      if (e.type === 'form' && e.fields && e.fields.length) {
+        const fields = e.fields.map(f => ({
+          name: f.name,
+          placeholder: f.placeholder,
+          value: f.value,
+          isTextarea: !!f.isTextarea,
+          itype: f.itype || 'text'
+        }))
+        this.formData[e.gid] = {}
+        fields.forEach(f => { this.formData[e.gid][f.name] = f.value })
+        this.forms[e.gid] = {
+          action: e.action,
+          method: e.method,
+          submitText: e.submitText || (e.action ? '提交' : '搜索'),
+          fields
+        }
+        fields.forEach(f => {
+          const hasVal = !!(f.value && f.value.length)
+          blocks.push({
+            kind: 'field',
+            gid: e.gid,
+            fieldName: f.name,
+            boxCls: 'web-field',
+            textCls: hasVal ? 'web-field-text' : 'web-field-placeholder',
+            runs: [{ text: hasVal ? f.value : (f.placeholder || (f.isTextarea ? '多行文本' : '输入')), cls: hasVal ? 'web-field-text' : 'web-field-placeholder' }],
+            _index: e._index
+          })
+        })
+        blocks.push({
+          kind: 'submit',
+          gid: e.gid,
+          boxCls: 'web-submit',
+          textCls: 'web-submit-text',
+          runs: [{ text: e.submitText || (e.action ? '提交' : '搜索'), cls: 'web-submit-text' }],
+          _index: e._index + 0.5
+        })
+        continue
+      }
+      if (e.type === 'img') {
+        blocks.push({
+          kind: 'image',
+          imgSrc: e.thumbUrl,
+          alt: e.alt || '',
+          boxCls: '',
+          textCls: '',
+          runs: [],
+          _index: e._index
+        })
+        continue
+      }
+      if (e.type === 'hr') {
+        blocks.push({ kind: 'hr', boxCls: '', textCls: 'hr-block', runs: [], _index: e._index })
+        continue
+      }
+      // 独立链接（不在段落内） -> 可点击卡片块；run 不带 url，由外层 div 点击跳转（避免双重触发）
+      if (e.type === 'a') {
+        const t = (e.parts || []).map(p => p.text).join('') || e.text || ''
+        if (t) blocks.push({ kind: 'link', url: e.url, boxCls: 'link-block', textCls: 'link-block-text', runs: [{ text: '🔗 ' + t, cls: 'link-block-text' }], _index: e._index })
+        continue
+      }
+      // 文字类元素：展开成行内 runs（加粗/斜体/颜色行内生效）。
+      // 关键：Vela 的 <text> 内 <span onclick> 不响应点击事件，故行内链接不靠 span 跳转，
+      // 而是把链接文字融回正文（普通文本），并额外生成一个独立可点击卡片块（外层 div onclick 可靠）。
+      const parts = e.type === 'pre'
+        ? [{ type: 'text', text: e.text || '' }]
+        : (e.parts || [])
+      const prefix = e.type === 'li' ? '• ' : ''
+      const runs = []
+      let hasStrong = false
+      let hasEm = false
+      let blockColor = ''
+      const inlineLinks = []
+      for (const p of parts) {
+        if (p.type === 'a') {
+          runs.push({ text: p.text || '', cls: '', color: '' })
+          if (p.url) inlineLinks.push({ text: p.text || p.url, url: p.url })
+        } else if (p.type === 'strong') {
+          runs.push({ text: p.text || '', cls: 'strong-inline' })
+          hasStrong = true
+        } else if (p.type === 'em') {
+          runs.push({ text: p.text || '', cls: 'em-inline' })
+          hasEm = true
+        } else if (p.type === 'text') {
+          runs.push({ text: p.text || '', cls: '', color: p.color || '' })
+          if (p.color && !blockColor) blockColor = p.color
+        }
+      }
+      if (prefix) runs.unshift({ text: prefix, cls: '', color: '' })
+      let textCls = e.type
+      if (hasStrong) textCls += ' strong-text'
+      if (hasEm) textCls += ' em-text'
+      if (runs.length) blocks.push({ kind: 'text', boxCls: '', textCls, color: blockColor, runs, _index: e._index })
+      // 行内链接 -> 紧跟其后的独立可点击卡片（按出现顺序，_index 微递增避免排序不稳定）
+      inlineLinks.forEach((lnk, i) => {
+        blocks.push({
+          kind: 'link',
+          url: lnk.url,
+          boxCls: 'link-block',
+          textCls: 'link-block-text',
+          runs: [{ text: '🔗 ' + lnk.text, cls: 'link-block-text' }],
+          _index: e._index + 0.01 + i * 0.001
+        })
+      })
+    }
+    blocks.sort((a, b) => a._index - b._index)
+    this.blocks = blocks
+  },
+
+  // 内容块统一点击入口：按 kind 分流（文本块不处理，行内链接由 onRunClick 处理）
+  onBlockClick(b) {
+    if (!b) return
+    if (b.kind === 'link') this.openLink(b.url)
+    else if (b.kind === 'field') this.focusWebField(b.gid, b.fieldName)
+    else if (b.kind === 'submit') this.submitWebForm(b.gid)
+    else if (b.kind === 'image') this.viewImage({ thumbUrl: b.imgSrc, url: b.imgSrc, alt: b.alt })
+  },
+
+  refreshPage() {
+    if (this.currentUrl) this.loadUrl(this.currentUrl)
+  },
+
+  openLink(url) { if (url) this.loadUrl(url) },
+
+  // 网页表单提交：组装字段，fetch action，结果重新渲染（Vela 无 <form> 元素，提交自实现）
+  submitWebForm(gid) {
+    const form = this.forms[gid]
+    if (!form || !form.action) {
+      this.showToast('此输入框无提交目标')
+      return
+    }
+    const data = this.formData[gid] || {}
+    const params = form.fields
+      .map(f => encodeURIComponent(f.name) + '=' + encodeURIComponent(data[f.name] || ''))
+      .join('&')
+    const opt = {
+      url: form.action,
+      method: (form.method || 'get').toUpperCase(),
+      responseType: 'text',
+      header: {
+        'User-Agent': 'Mozilla/5.0 (compatible; WatchBrowser/1.0)',
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      success: (res) => { this.handleSuccess(res); this.showToast('已提交') },
+      fail: (err) => this.handleError(err)
+    }
+    if (form.method === 'post') {
+      opt.data = params
+    } else {
+      opt.url = form.action + (form.action.indexOf('?') >= 0 ? '&' : '?') + params
+    }
+    this.isLoading = true
+    this.errorMsg = ''
+    fetch.fetch(opt)
+  },
+
+  viewImage(elem) {
+    this.currentImage = elem
+    this.showImageModal = true
+  },
+  closeImageModal() {
+    this.showImageModal = false
+    this.currentImage = null
+  },
+
+  savePage() {
+    if (!this.currentUrl || this.htmlElements.length === 0) {
+      this.showToast('无内容可保存')
+      return
+    }
+
+    const safeElements = this.htmlElements.slice(0, 100).map(e => ({
+      type: e.type,
+      parts: e.parts,
+      text: e.text,
+      url: e.url,
+      thumbUrl: e.thumbUrl,
+      alt: e.alt
+    }))
+
+    const pageData = {
+      id: Date.now().toString(),
+      title: truncateText(this.pageTitle, 50),
+      url: this.currentUrl,
+      elements: safeElements,
+      saveTime: new Date().toLocaleString()
+    }
+
+    let jsonStr
+    try {
+      jsonStr = JSON.stringify(pageData)
+      if (jsonStr.length > 100000) {
+        this.showToast('页面过大')
+        return
+      }
+    } catch (e) {
+      this.showToast('保存失败')
+      return
+    }
+
+    storage.get({
+      key: 'offline_pages',
+      success: (data) => {
+        let pages = []
+        try { pages = JSON.parse(data || '[]') } catch (e) {}
+        if (pages.length >= 20) pages = pages.slice(0, 19)
+        pages.unshift(pageData)
+        storage.set({
+          key: 'offline_pages',
+          value: JSON.stringify(pages),
+          success: () => this.showToast('保存成功'),
+          fail: () => this.showToast('保存失败')
+        })
+      },
+      fail: () => {
+        storage.set({
+          key: 'offline_pages',
+          value: JSON.stringify([pageData]),
+          success: () => this.showToast('保存成功'),
+          fail: () => this.showToast('保存失败')
+        })
+      }
+    })
+  },
+
+  addBookmark() {
+    if (!this.currentUrl || this.htmlElements.length === 0) {
+      this.showToast('无内容可收藏')
+      return
+    }
+
+    const title = this.pageTitle || this.displayUrl
+    const item = {
+      id: generateId(),
+      name: truncateText(title, 20),
+      url: this.currentUrl,
+      color: '#0a84ff',
+      icon: (title.charAt(0) || '?').toUpperCase()
+    }
+
+    storage.get({
+      key: 'user_bookmarks',
+      success: (data) => {
+        let list = []
+        try { list = JSON.parse(data || '[]') } catch (e) { list = [] }
+        if (list.some(b => b.url === item.url)) {
+          this.showToast('已在收藏夹')
+          return
+        }
+        if (list.length >= 50) list = list.slice(0, 49)
+        list.unshift(item)
+        storage.set({
+          key: 'user_bookmarks',
+          value: JSON.stringify(list),
+          success: () => this.showToast('已收藏'),
+          fail: () => this.showToast('收藏失败')
+        })
+      },
+      fail: () => {
+        storage.set({
+          key: 'user_bookmarks',
+          value: JSON.stringify([item]),
+          success: () => this.showToast('已收藏'),
+          fail: () => this.showToast('收藏失败')
+        })
+      }
+    })
+  },
+
+  showToast(msg) {
+    this.toastMsg = msg
+    this.showToast = true
+    setTimeout(() => this.showToast = false, 2000)
+  }
+}
+</script>
+
+<style>
+.page {
+  flex-direction: column;
+  height: 480px;
+  background-color: #000;
+}
+
+.navbar {
+  height: 44px;
+  flex-direction: row;
+  align-items: center;
+  padding: 0 8px;
+  background-color: #1c1c1e;
+}
+
+.nav-back, .nav-go {
+  width: 32px;
+  height: 32px;
+  border-radius: 16px;
+  background-color: #2c2c2e;
+  justify-content: center;
+  align-items: center;
+}
+
+.nav-go { background-color: #0a84ff; }
+
+.icon-back { color: #0a84ff; font-size: 16px; }
+.icon-go { color: #fff; font-size: 16px; }
+
+.nav-input {
+  flex: 1;
+  height: 32px;
+  margin: 0 8px;
+  padding: 0 12px;
+  border-radius: 16px;
+  background-color: #2c2c2e;
+  justify-content: center;
+}
+
+.input-text {
+  color: #fff;
+  font-size: 13px;
+  lines: 1;
+  text-overflow: ellipsis;
+}
+
+.input-placeholder {
+  color: #8e8e93;
+  font-size: 13px;
+}
+
+.content-area {
+  flex: 1;
+  background-color: #000;
+}
+
+.web-content {
+  flex: 1;
+  flex-direction: column;
+  padding: 12px;
+}
+
+.page-title {
+  flex-shrink: 0;
+  color: #0a84ff;
+  font-size: 16px;
+  font-weight: bold;
+  line-height: 22px;
+  margin-bottom: 12px;
+  lines: 0;
+}
+
+/* 每个内容块：不被 scroll 压缩，按内容真实高度展开 */
+.block {
+  flex-shrink: 0;
+  flex-direction: column;
+  margin-bottom: 10px;
+}
+
+/* 文本类：cssClass 直接作为 class 渲染（无类型 if 分支） */
+.h1, .h2, .h3, .h4, .h5, .h6, .p, .li, .blockquote, .pre {
+  color: #c9d1d9;
+  font-size: 13px;
+  line-height: 20px;
+  lines: 0;
+}
+
+.h1 { color: #0a84ff; font-weight: bold; font-size: 18px; line-height: 24px; }
+.h2 { color: #0a84ff; font-weight: bold; font-size: 16px; line-height: 22px; }
+.h3 { color: #0a84ff; font-weight: bold; font-size: 15px; line-height: 21px; }
+.h4 { color: #0a84ff; font-weight: bold; font-size: 14px; }
+.h5 { color: #0a84ff; font-weight: bold; font-size: 13px; }
+.h6 { color: #0a84ff; font-weight: bold; font-size: 12px; }
+.li { padding-left: 4px; }
+
+/* 加粗 / 斜体（来自 <strong>/<b>、<em>/<i>，作用于整块 text） */
+.strong-text { font-weight: bold; }
+.em-text { font-style: italic; }
+
+/* 行内片段样式（作用于 text 内 span，实现行内混排） */
+.strong-inline { font-weight: bold; }
+.em-inline { font-style: italic; }
+.inline-link { color: #0a84ff; text-decoration: underline; }
+.blockquote {
+  border-left-width: 3px;
+  border-left-color: #30363d;
+  padding-left: 12px;
+  color: #8b949e;
+  font-style: italic;
+}
+.pre {
+  background-color: #161b22;
+  border-radius: 6px;
+  padding: 8px;
+  font-family: monospace;
+  font-size: 11px;
+  color: #c9d1d9;
+}
+.hr-block {
+  height: 1px;
+  background-color: #30363d;
+  margin: 6px 0;
+}
+
+/* 链接块：可点击（外层 div 用 .link-block，文本用 .link-block-text） */
+.link-block {
+  flex-shrink: 0;
+  background-color: #21262d;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.link-block-text {
+  color: #0a84ff;
+  font-size: 13px;
+  line-height: 19px;
+  lines: 0;
+}
+
+/* 图片块：文本占位，点击查看大图 */
+.img-block {
+  flex-shrink: 0;
+  flex-direction: column;
+}
+.img-content {
+  width: 100%;
+  height: 120px;
+  border-radius: 8px;
+  resize-mode: cover;
+}
+.img-alt {
+  color: #8b949e;
+  font-size: 11px;
+  line-height: 16px;
+  margin-top: 4px;
+  lines: 0;
+}
+
+/* 网页表单字段：可见输入框（外层 div 用 .web-field，文本用 .web-field-text/-placeholder） */
+.web-form {
+  flex-shrink: 0;
+  flex-direction: column;
+  margin: 10px 0;
+  padding: 10px;
+  background-color: #161b22;
+  border-radius: 8px;
+}
+
+.web-field {
+  flex-shrink: 0;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 36px;
+  background-color: #0d1117;
+  border-width: 1px;
+  border-color: #30363d;
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.web-field-text {
+  color: #c9d1d9;
+  font-size: 13px;
+  lines: 0;
+}
+
+.web-field-placeholder {
+  color: #8b949e;
+  font-size: 13px;
+}
+
+.web-submit {
+  height: 36px;
+  border-radius: 6px;
+  background-color: #0a84ff;
+  justify-content: center;
+  align-items: center;
+}
+
+.web-submit-text {
+  color: #fff;
+  font-size: 13px;
+}
+
+.image-alt {
+  color: #8b949e;
+  font-size: 11px;
+  margin-top: 4px;
+}
+
+.status-loading, .status-error, .status-empty {
+  flex: 1;
+  justify-content: center;
+  align-items: center;
+}
+
+.spinner {
+  width: 40px;
+  height: 40px;
+  border-radius: 20px;
+  border-width: 3px;
+  border-color: #3a3a3c;
+  border-top-color: #0a84ff;
+}
+
+.loading-text {
+  color: #8e8e93;
+  font-size: 14px;
+  margin-top: 12px;
+}
+
+.error-icon {
+  color: #ff453a;
+  font-size: 48px;
+  margin-bottom: 12px;
+}
+
+.error-text {
+  color: #8e8e93;
+  font-size: 14px;
+  margin-bottom: 16px;
+}
+
+.btn-retry {
+  padding: 10px 24px;
+  border-radius: 20px;
+  background-color: #0a84ff;
+}
+
+.btn-text {
+  color: #fff;
+  font-size: 14px;
+}
+
+.empty-icon {
+  color: #3a3a3c;
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+
+.empty-title {
+  color: #8e8e93;
+  font-size: 18px;
+  margin-bottom: 8px;
+}
+
+.empty-desc {
+  color: #48484a;
+  font-size: 14px;
+}
+
+.empty-input-btn {
+  margin-top: 16px;
+  padding: 12px 24px;
+  border-radius: 20px;
+  background-color: #0a84ff;
+}
+
+.empty-input-text {
+  color: #fff;
+  font-size: 14px;
+}
+
+.toolbar {
+  height: 44px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-around;
+  padding: 0 8px;
+  background-color: #1c1c1e;
+}
+
+.tool-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 18px;
+  background-color: #2c2c2e;
+  justify-content: center;
+  align-items: center;
+}
+
+.tool-btn.disabled { opacity: 0.3; }
+.tool-btn.primary { background-color: #0a84ff; }
+
+.tool-icon {
+  color: #0a84ff;
+  font-size: 18px;
+}
+
+.primary-icon {
+  color: #fff;
+  font-size: 18px;
+}
+
+.keyboard {
+  background-color: #1c1c1e;
+  padding: 8px;
+  flex-direction: column;
+  border-top-width: 1px;
+  border-top-color: #2c2c2e;
+}
+
+.kb-display {
+  height: 36px;
+  flex-direction: row;
+  align-items: center;
+  padding: 0 8px;
+  margin-bottom: 8px;
+  background-color: #2c2c2e;
+  border-radius: 8px;
+}
+
+.kb-input {
+  flex: 1;
+  color: #0a84ff;
+  font-size: 14px;
+}
+
+.kb-delete {
+  width: 28px;
+  height: 28px;
+  border-radius: 14px;
+  background-color: #ff453a;
+  justify-content: center;
+  align-items: center;
+}
+
+.kb-del-icon {
+  color: #fff;
+  font-size: 14px;
+}
+
+.kb-actions {
+  flex-direction: row;
+  align-items: center;
+}
+
+.kb-done {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 14px;
+  background-color: #0a84ff;
+  justify-content: center;
+  align-items: center;
+  margin-right: 8px;
+}
+
+.kb-done-text {
+  color: #fff;
+  font-size: 13px;
+}
+
+.kb-row {
+  flex-direction: row;
+  justify-content: center;
+  margin-bottom: 4px;
+}
+
+.kb-key {
+  width: 30px;
+  height: 36px;
+  margin: 0 2px;
+  border-radius: 6px;
+  background-color: #2c2c2e;
+  justify-content: center;
+  align-items: center;
+  color: #fff;
+  font-size: 14px;
+}
+
+.kb-wide { width: 50px; }
+.kb-space { width: 70px; }
+
+.image-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.95);
+  justify-content: center;
+  align-items: center;
+}
+
+.modal-image {
+  width: 100%;
+  max-height: 350px;
+}
+
+.modal-url {
+  color: #8b949e;
+  font-size: 11px;
+  margin-top: 12px;
+  max-width: 280px;
+  text-align: center;
+}
+
+.modal-close {
+  margin-top: 20px;
+  padding: 10px 24px;
+  border-radius: 8px;
+  background-color: #0a84ff;
+}
+
+.close-text {
+  color: #fff;
+  font-size: 14px;
+}
+
+.toast {
+  position: fixed;
+  top: 100px;
+  left: 68px;
+  width: 200px;
+  height: 36px;
+  border-radius: 8px;
+  background-color: rgba(48, 209, 88, 0.95);
+  justify-content: center;
+  align-items: center;
+}
+
+.toast-text {
+  color: #fff;
+  font-size: 13px;
+}
+</style>

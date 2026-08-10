@@ -1,0 +1,56 @@
+{
+  "app": {
+    "name": "Souli Browser",
+    "version": "v1.0.0",
+    "description": "Lightweight browser for smartwatches"
+  },
+  "common": {
+    "confirm": "OK",
+    "cancel": "Cancel",
+    "back": "Back",
+    "save": "Save",
+    "delete": "Delete",
+    "edit": "Edit",
+    "done": "Done",
+    "loading": "Loading",
+    "empty": "No content",
+    "retry": "Retry",
+    "close": "Close"
+  },
+  "home": {
+    "searchPlaceholder": "Search or enter URL",
+    "bookmarks": "My Bookmarks",
+    "shortcuts": "Shortcuts",
+    "functions": "Functions",
+    "viewAll": "View All"
+  },
+  "browser": {
+    "inputUrl": "Enter URL",
+    "startBrowsing": "Start Browsing",
+    "enterUrlHint": "Tap above to enter URL",
+    "loading": "Loading",
+    "loadFailed": "Failed to load",
+    "networkError": "Network error, please check connection",
+    "noContent": "Page has no content or unsupported format",
+    "saveSuccess": "Saved successfully",
+    "saveFailed": "Failed to save",
+    "noContentToSave": "No content to save"
+  },
+  "bookmarks": {
+    "title": "Bookmarks",
+    "empty": "No bookmarks",
+    "emptyHint": "Add bookmarks while browsing",
+    "deleted": "Deleted"
+  },
+  "offline": {
+    "title": "Offline Pages",
+    "empty": "No offline pages",
+    "emptyHint": "Save offline pages while browsing",
+    "elements": "elements"
+  },
+  "about": {
+    "title": "About",
+    "features": "Features",
+    "tech": "Technology"
+  }
+}
