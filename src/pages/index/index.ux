@@ -78,25 +78,24 @@
       </div>
     </div>
 
-    <!-- 输入法（NEORUAA 三方 IME：中文拼音 / 英文 / 数字，含候选词；screentype=rect 适配本应用 designWidth 336） -->
-    <div class="kb-panel" if="{{keyboardVisible}}">
-      <div class="kb-quick">
-        <div class="kb-quick-chip" onclick="appendText('https://')"><text class="kb-quick-text">https://</text></div>
-        <div class="kb-quick-chip" onclick="appendText('www.')"><text class="kb-quick-text">www.</text></div>
-        <div class="kb-quick-chip" onclick="appendText('.com')"><text class="kb-quick-text">.com</text></div>
-        <div class="kb-quick-chip" onclick="appendText('.cn')"><text class="kb-quick-text">.cn</text></div>
-      </div>
-      <input-method
-        hide="{{!keyboardVisible}}"
-        keyboardtype="QWERTY"
-        screentype="rect"
-        maxlength="8"
-        vibratemode="short"
-        @complete="onImeComplete"
-        @delete="onImeDelete"
-        @visibility-change="onImeVisible"
-      ></input-method>
+    <!-- 快捷片段：独立 fixed 层，随 keyboardVisible 显隐（不包裹 IME，避免绝对定位根节点相对 0 高度容器塌陷） -->
+    <div class="kb-quick" if="{{keyboardVisible}}">
+      <div class="kb-quick-chip" onclick="appendText('https://')"><text class="kb-quick-text">https://</text></div>
+      <div class="kb-quick-chip" onclick="appendText('www.')"><text class="kb-quick-text">www.</text></div>
+      <div class="kb-quick-chip" onclick="appendText('.com')"><text class="kb-quick-text">.com</text></div>
+      <div class="kb-quick-chip" onclick="appendText('.cn')"><text class="kb-quick-text">.cn</text></div>
     </div>
+
+    <!-- 三方输入法：常驻，hide 单向控制显隐（对齐 NEORUAA 官方用法；不靠 v-if 卸载，避免 absolute 根节点相对 0 高度容器定位塌陷） -->
+    <input-method
+      hide="{{!keyboardVisible}}"
+      keyboardtype="QWERTY"
+      screentype="rect"
+      maxlength="8"
+      vibratemode="short"
+      @complete="onImeComplete"
+      @delete="onImeDelete"
+    ></input-method>
 
     <!-- 图片预览 -->
     <div class="image-modal" if="{{showImageModal}}" onclick="closeImageModal">
@@ -1300,17 +1299,9 @@ export default {
   font-size: 18px;
 }
 
-/* 输入法面板：固定在底部，IME 自身绝对定位贴底，快捷片段浮于其上方 */
-.kb-panel {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  flex-direction: column;
-}
-
+/* 输入法快捷片段：独立 fixed 层浮于键盘上方，IME 自身常驻贴底 */
 .kb-quick {
-  position: absolute;
+  position: fixed;
   left: 0;
   right: 0;
   bottom: 259px;

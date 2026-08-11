@@ -52,7 +52,6 @@
       vibratemode="short"
       @complete="onImeComplete"
       @delete="onImeDelete"
-      @visibility-change="onImeVisible"
     ></input-method>
 
     <div class="toast" if="{{showToast}}">
