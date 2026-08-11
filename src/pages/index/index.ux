@@ -1,3 +1,5 @@
+<import name="input-method" src="../../components/InputMethod/InputMethod.ux" />
+
 <template>
   <div class="page">
     <!-- 导航栏 -->
@@ -47,7 +49,7 @@
         <!-- 统一内容流：文本/链接/图片/表单字段按 _index 交错；图片用单分支 if 渲染，行内用 span for 混排 -->
         <div class="block {{b.boxCls}}" for="{{b in blocks}}" onclick="onBlockClick(b)">
           <image if="{{b.kind === 'image'}}" class="img-content" src="{{b.imgSrc}}"></image>
-          <text if="{{b.kind !== 'image'}}" class="{{b.textCls}}" style="{{b.color ? 'color: ' + b.color : ''}}" lines="0">
+          <text if="{{b.kind !== 'image'}}" class="{{b.textCls}}" style="{{b.color ? 'color: ' + b.color : ''}}">
             <span for="{{run in b.runs}}" class="{{run.cls}}" style="{{run.color ? 'color: ' + run.color : ''}}">{{run.text}}</span>
           </text>
         </div>
@@ -76,29 +78,24 @@
       </div>
     </div>
 
-    <!-- 键盘（改为常规 flex 流元素，去掉 position:fixed，避免 navbar 被遮挡/错位） -->
-    <div class="keyboard" if="{{keyboardVisible}}">
-      <div class="kb-display">
-        <text class="kb-input">{{inputText}}_</text>
-        <div class="kb-actions">
-          <div class="kb-done" onclick="hideKeyboard">
-            <text class="kb-done-text">完成</text>
-          </div>
-          <div class="kb-delete" onclick="deleteChar">
-            <text class="kb-del-icon">X</text>
-          </div>
-        </div>
+    <!-- 输入法（NEORUAA 三方 IME：中文拼音 / 英文 / 数字，含候选词；screentype=rect 适配本应用 designWidth 336） -->
+    <div class="kb-panel" if="{{keyboardVisible}}">
+      <div class="kb-quick">
+        <div class="kb-quick-chip" onclick="appendText('https://')"><text class="kb-quick-text">https://</text></div>
+        <div class="kb-quick-chip" onclick="appendText('www.')"><text class="kb-quick-text">www.</text></div>
+        <div class="kb-quick-chip" onclick="appendText('.com')"><text class="kb-quick-text">.com</text></div>
+        <div class="kb-quick-chip" onclick="appendText('.cn')"><text class="kb-quick-text">.cn</text></div>
       </div>
-      <div class="kb-row" for="{{row in keyRows}}">
-        <text class="kb-key {{k === ' ' ? 'kb-space' : ''}}" for="{{k in row}}" onclick="typeChar(k)">{{k}}</text>
-      </div>
-      <div class="kb-row">
-        <text class="kb-key kb-wide" onclick="typeChar('.')">.</text>
-        <text class="kb-key" onclick="typeChar('-')">-</text>
-        <text class="kb-key" onclick="typeChar('/')">/</text>
-        <text class="kb-key" onclick="typeChar(':')">:</text>
-        <text class="kb-key kb-space" onclick="typeChar(' ')">空格</text>
-      </div>
+      <input-method
+        hide="{{false}}"
+        keyboardtype="QWERTY"
+        screentype="rect"
+        maxlength="8"
+        vibratemode="short"
+        @complete="onImeComplete"
+        @delete="onImeDelete"
+        @visibility-change="onImeVisible"
+      ></input-method>
     </div>
 
     <!-- 图片预览 -->
@@ -408,11 +405,6 @@ export default {
     keyboardMode: 'url',
     activeGid: '',
     activeField: '',
-    keyRows: [
-      ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'],
-      ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L'],
-      ['Z', 'X', 'C', 'V', 'B', 'N', 'M']
-    ],
     showImageModal: false,
     currentImage: null,
     showToast: false,
@@ -537,8 +529,19 @@ export default {
     this.keyboardVisible = false
   },
 
-  typeChar(char) { this.inputText += char },
-  deleteChar() { this.inputText = this.inputText.slice(0, -1) },
+  // 三方输入法事件：提交字符（中文选词 / 英文逐字母 / 数字）追加到编辑缓冲
+  onImeComplete(e) {
+    const c = e && e.detail && e.detail.content
+    if (c) this.inputText += c
+  },
+  onImeDelete() {
+    this.inputText = this.inputText.slice(0, -1)
+  },
+  onImeVisible(e) {
+    this.keyboardVisible = e && e.detail ? e.detail.visible : this.keyboardVisible
+  },
+  // 网址快捷片段（https://、www.、.com、.cn）
+  appendText(s) { this.inputText += s },
 
   confirmInput() {
     if (this.keyboardMode === 'field') { this.hideKeyboard(); return }
@@ -1297,84 +1300,41 @@ export default {
   font-size: 18px;
 }
 
-.keyboard {
-  background-color: #1c1c1e;
-  padding: 8px;
+/* 输入法面板：固定在底部，IME 自身绝对定位贴底，快捷片段浮于其上方 */
+.kb-panel {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
   flex-direction: column;
-  border-top-width: 1px;
-  border-top-color: #2c2c2e;
 }
 
-.kb-display {
-  height: 36px;
+.kb-quick {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 259px;
   flex-direction: row;
-  align-items: center;
+  justify-content: space-around;
   padding: 0 8px;
-  margin-bottom: 8px;
-  background-color: #2c2c2e;
-  border-radius: 8px;
 }
 
-.kb-input {
+.kb-quick-chip {
   flex: 1;
-  color: #0a84ff;
-  font-size: 14px;
-}
-
-.kb-delete {
-  width: 28px;
-  height: 28px;
-  border-radius: 14px;
-  background-color: #ff453a;
-  justify-content: center;
-  align-items: center;
-}
-
-.kb-del-icon {
-  color: #fff;
-  font-size: 14px;
-}
-
-.kb-actions {
-  flex-direction: row;
-  align-items: center;
-}
-
-.kb-done {
-  height: 28px;
-  padding: 0 10px;
-  border-radius: 14px;
-  background-color: #0a84ff;
-  justify-content: center;
-  align-items: center;
-  margin-right: 8px;
-}
-
-.kb-done-text {
-  color: #fff;
-  font-size: 13px;
-}
-
-.kb-row {
-  flex-direction: row;
-  justify-content: center;
-  margin-bottom: 4px;
-}
-
-.kb-key {
-  width: 30px;
-  height: 36px;
-  margin: 0 2px;
-  border-radius: 6px;
+  height: 32px;
+  margin: 0 3px;
+  border-radius: 16px;
   background-color: #2c2c2e;
+  border: 1px solid #3a3a3c;
   justify-content: center;
   align-items: center;
-  color: #fff;
-  font-size: 14px;
 }
 
-.kb-wide { width: 50px; }
-.kb-space { width: 70px; }
+.kb-quick-text {
+  color: #0a84ff;
+  font-size: 12px;
+  font-weight: 500;
+}
 
 .image-modal {
   position: fixed;

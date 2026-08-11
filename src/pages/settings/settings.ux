@@ -1,4 +1,4 @@
-<import name="simple-keyboard" src="../../components/SimpleKeyboard/SimpleKeyboard.ux" />
+<import name="input-method" src="../../components/InputMethod/InputMethod.ux" />
 
 <template>
   <div class="page">
@@ -43,17 +43,17 @@
       <text class="saved-tip warn" if="{{!savedToken}}">尚未保存，代理功能不可用</text>
     </div>
 
-    <!-- 输入键盘 -->
-    <simple-keyboard
-      visible="{{kbVisible}}"
-      input-value="{{tokenInput}}"
-      placeholder="输入代理验证码"
-      onkeyinput="onKeyInput"
-      onkeydelete="onKeyDelete"
-      onkeyclear="onKeyClear"
-      onkeycancel="onKeyCancel"
-      onkeyconfirm="onKeyConfirm"
-    />
+    <!-- 输入法：三方 IME（中文拼音 / 英文 / 数字），screentype=rect 适配本应用 designWidth 336 -->
+    <input-method
+      hide="{{!kbVisible}}"
+      keyboardtype="QWERTY"
+      screentype="rect"
+      maxlength="5"
+      vibratemode="short"
+      @complete="onImeComplete"
+      @delete="onImeDelete"
+      @visibility-change="onImeVisible"
+    ></input-method>
 
     <div class="toast" if="{{showToast}}">
       <text class="toast-text">{{toastMsg}}</text>
@@ -105,25 +105,18 @@ export default {
     })
   },
 
-  onKeyInput(e) {
-    const v = e && (e.value !== undefined ? e.value : (e.detail && e.detail.value))
-    if (v) this.tokenInput = (this.tokenInput || '') + v
+  // 三方输入法事件：提交字符（中文选词 / 英文逐字母 / 数字）累积进验证码
+  onImeComplete(e) {
+    const c = e && e.detail && e.detail.content
+    if (c) this.tokenInput = (this.tokenInput || '') + c
   },
 
-  onKeyDelete() {
+  onImeDelete() {
     this.tokenInput = (this.tokenInput || '').slice(0, -1)
   },
 
-  onKeyClear() {
-    this.tokenInput = ''
-  },
-
-  onKeyCancel() {
-    this.kbVisible = false
-  },
-
-  onKeyConfirm() {
-    this.saveToken()
+  onImeVisible(e) {
+    this.kbVisible = e && e.detail ? e.detail.visible : this.kbVisible
   },
 
   clearInput() {
