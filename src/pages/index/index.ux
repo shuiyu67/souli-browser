@@ -87,7 +87,7 @@
         <div class="kb-quick-chip" onclick="appendText('.cn')"><text class="kb-quick-text">.cn</text></div>
       </div>
       <input-method
-        hide="{{false}}"
+        hide="{{!keyboardVisible}}"
         keyboardtype="QWERTY"
         screentype="rect"
         maxlength="8"

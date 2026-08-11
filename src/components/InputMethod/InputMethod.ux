@@ -749,7 +749,7 @@ export default {
     this.resetResultList();
   },
   watchHidePropsChange(newV, oldV) {
-    this.$emit("visibilityChange", { visible: newV });
+    this.$emit("visibilityChange", { visible: !newV });
     // 键盘从隐藏切到显示(hide:true→false)：首次弹出才把键盘子树建入 DOM（keyboardCreated 置 true 保活，
     // 之后 hide 切换只走 show 显隐、不再重建）。同时懒初始化字典（幂等）。
     if (newV === false) {
