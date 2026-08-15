@@ -24,13 +24,13 @@
       </div>
       <text class="hint">开启后优先用服务器执行 JS 渲染（需已填入验证码）；关闭则直连，普通站点无需验证码即可浏览。</text>
 
-      <!-- 当前输入/已保存展示 -->
-      <div class="token-box" onclick="showKeyboard">
+      <!-- 当前输入/已保存展示（键盘未弹出时） -->
+      <div class="token-box" if="{{!kbVisible}}" onclick="showKeyboard">
         <text class="token-text" if="{{tokenInput}}">{{tokenInput}}</text>
         <text class="token-placeholder" if="{{!tokenInput}}">点击此处输入验证码</text>
       </div>
 
-      <div class="btn-row">
+      <div class="btn-row" if="{{!kbVisible}}">
         <div class="btn btn-clear" onclick="clearInput">
           <text class="btn-text">清空</text>
         </div>
@@ -39,8 +39,25 @@
         </div>
       </div>
 
-      <text class="saved-tip" if="{{savedToken}}">已保存：{{savedToken}}</text>
-      <text class="saved-tip warn" if="{{!savedToken}}">尚未保存，代理功能不可用</text>
+      <text class="saved-tip" if="{{savedToken && !kbVisible}}">已保存：{{savedToken}}</text>
+      <text class="saved-tip warn" if="{{!savedToken && !kbVisible}}">尚未保存，代理功能不可用</text>
+    </div>
+
+    <!-- 键盘弹出时：验证码输入框与操作键吸在键盘正上方（rect 键盘高 255px + 拼音行余量），避免被键盘浮层遮挡 -->
+    <div class="ime-panel" if="{{kbVisible}}">
+      <text class="ime-hint">验证码（已填 {{tokenInput.length}}/5）</text>
+      <div class="token-box ime-token">
+        <text class="token-text" if="{{tokenInput}}">{{tokenInput}}</text>
+        <text class="token-placeholder" if="{{!tokenInput}}">用下方键盘输入…</text>
+      </div>
+      <div class="btn-row">
+        <div class="btn btn-clear" onclick="clearInput">
+          <text class="btn-text">清空</text>
+        </div>
+        <div class="btn btn-save" onclick="saveToken">
+          <text class="btn-text">保存</text>
+        </div>
+      </div>
     </div>
 
     <!-- 输入法：三方 IME（中文拼音 / 英文 / 数字），screentype=rect 适配本应用 designWidth 336 -->
@@ -159,6 +176,7 @@ export default {
   flex-direction: column;
   height: 480px;
   background-color: #0a0a0a;
+  position: relative;
 }
 
 .navbar {
@@ -326,5 +344,26 @@ export default {
 .toast-text {
   color: #ffffff;
   font-size: 13px;
+}
+
+/* 键盘弹出时吸附在键盘正上方的输入条（rect 键盘高 255px，留 30px 给拼音行余量） */
+.ime-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 285px;
+  flex-direction: column;
+  padding: 12px 16px;
+  background-color: #0a0a0a;
+}
+
+.ime-hint {
+  color: #8e8e93;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.ime-token {
+  margin-bottom: 10px;
 }
 </style>
