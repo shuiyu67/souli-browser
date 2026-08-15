@@ -88,7 +88,8 @@ export default {
     useProxy: false,
     kbVisible: false,
     toastMsg: '',
-    showToast: false
+    showToast: false,
+    _initProxyRead: false
   },
 
   onInit() {
@@ -102,8 +103,13 @@ export default {
     })
     storage.get({
       key: 'use_proxy',
-      success: (data) => { this.useProxy = (data === 'true' || data === true) },
-      fail: () => {}
+      success: (data) => {
+        // 仅作为一次性初始值：用户一旦手动切换过开关，就不再用读回结果覆盖
+        if (this._initProxyRead) return
+        this._initProxyRead = true
+        this.useProxy = (data === 'true' || data === true)
+      },
+      fail: () => { this._initProxyRead = true }
     })
   },
 
@@ -113,6 +119,7 @@ export default {
 
   toggleProxy() {
     this.useProxy = !this.useProxy
+    this._initProxyRead = true  // 用户已手动操作，onInit 的延迟读回不再覆盖
     storage.set({
       key: 'use_proxy',
       value: this.useProxy ? 'true' : 'false',
