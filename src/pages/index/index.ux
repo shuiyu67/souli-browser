@@ -48,7 +48,7 @@
         <text class="page-title" if="{{pageTitle}}">{{pageTitle}}</text>
         <!-- 统一内容流：文本/链接/图片/表单字段按 _index 交错；图片用单分支 if 渲染，行内用 span for 混排 -->
         <div class="block {{b.boxCls}}" for="{{b in blocks}}" onclick="onBlockClick(b)">
-          <image if="{{b.kind === 'image'}}" class="img-content" src="{{b.imgSrc}}"></image>
+          <image if="{{b.kind === 'image'}}" class="img-content {{b.inline ? 'img-inline' : ''}}" src="{{b.imgSrc}}" style="{{b.inline && b.imgW ? 'width:' + b.imgW + 'px;height:' + b.imgH + 'px' : ''}}"></image>
           <text if="{{b.kind !== 'image'}}" class="{{b.textCls}}" style="{{b.color ? 'color: ' + b.color : ''}}">
             <span for="{{run in b.runs}}" class="{{run.cls}}" style="{{run.color ? 'color: ' + run.color : ''}}">{{run.text}}</span>
           </text>
@@ -56,8 +56,8 @@
       </scroll>
     </div>
 
-    <!-- 底部工具栏 -->
-    <div class="toolbar">
+    <!-- 底部工具栏：键盘弹出时收起（键盘覆盖该区域，常驻反而徒增遮挡） -->
+    <div class="toolbar" if="{{!keyboardVisible}}">
       <div class="tool-btn {{canGoBack ? '' : 'disabled'}}" onclick="goBackHistory">
         <text class="tool-icon">&lt;</text>
       </div>
@@ -78,12 +78,21 @@
       </div>
     </div>
 
-    <!-- 快捷片段：独立 fixed 层，随 keyboardVisible 显隐（不包裹 IME，避免绝对定位根节点相对 0 高度容器塌陷） -->
-    <div class="kb-quick" if="{{keyboardVisible}}">
-      <div class="kb-quick-chip" onclick="appendText('https://')"><text class="kb-quick-text">https://</text></div>
-      <div class="kb-quick-chip" onclick="appendText('www.')"><text class="kb-quick-text">www.</text></div>
-      <div class="kb-quick-chip" onclick="appendText('.com')"><text class="kb-quick-text">.com</text></div>
-      <div class="kb-quick-chip" onclick="appendText('.cn')"><text class="kb-quick-text">.cn</text></div>
+    <!-- 键盘操作条：随 keyboardVisible 显隐；顶部一行实时显示正在输入的内容，网址模式附快捷片段，右侧「退出」仅收起键盘、「完成」收起/提交 -->
+    <div class="kb-bar" if="{{keyboardVisible}}">
+      <text class="kb-preview">{{inputText || (keyboardMode === 'field' ? '输入内容…' : '输入网址…')}}</text>
+      <div class="kb-row">
+        <div class="kb-quick" if="{{keyboardMode === 'url'}}">
+          <div class="kb-quick-chip" onclick="appendText('https://')"><text class="kb-quick-text">https://</text></div>
+          <div class="kb-quick-chip" onclick="appendText('www.')"><text class="kb-quick-text">www.</text></div>
+          <div class="kb-quick-chip" onclick="appendText('.com')"><text class="kb-quick-text">.com</text></div>
+          <div class="kb-quick-chip" onclick="appendText('.cn')"><text class="kb-quick-text">.cn</text></div>
+        </div>
+        <div class="kb-actions">
+          <div class="kb-exit" onclick="exitKeyboard"><text class="kb-exit-text">退出</text></div>
+          <div class="kb-done" onclick="confirmInput"><text class="kb-done-text">完成</text></div>
+        </div>
+      </div>
     </div>
 
     <!-- 三方输入法：常驻，hide 单向控制显隐（对齐 NEORUAA 官方用法；不靠 v-if 卸载，避免 absolute 根节点相对 0 高度容器定位塌陷） -->
@@ -320,7 +329,14 @@ class HtmlParser {
       if (tag === 'img') {
         const src = child.attrs.src || child.attrs['data-src'] || ''
         const alt = child.attrs.alt || ''
-        if (src) this.elements.push({ type: 'img', url: resolveUrl(src, this.baseUrl), thumbUrl: resolveUrl(src, this.baseUrl), alt: decodeHtmlEntities(alt), _index: child.start })
+        // 服务端转出的缺字图是 data: URI，resolveUrl 会把它当相对路径拼坏，必须原样保留
+        const isData = src.startsWith('data:')
+        const resolved = isData ? src : resolveUrl(src, this.baseUrl)
+        const w = parseInt(child.attrs.width || '0', 10) || 0
+        const h = parseInt(child.attrs.height || '0', 10) || 0
+        // 双保险：内联转图 data URI 过大（>12KB）直接跳过，避免手环端 <image> 解码 OOM 黑屏
+        const tooBig = isData && src.length > 12000
+        if (src && !tooBig) this.elements.push({ type: 'img', url: resolved, thumbUrl: resolved, alt: decodeHtmlEntities(alt), inline: isData, imgW: w, imgH: h, _index: child.start })
         continue
       }
       if (tag === 'hr') { this.elements.push({ type: 'hr', _index: child.start }); continue }
@@ -381,6 +397,11 @@ class HtmlParser {
   }
 }
 
+// 渲染限流：内容过多的页面一次性渲染成数百个 block 会让 Vela 渲染器 OOM/崩溃黑屏，
+// 故对 block 与图片数量做上限，超出部分省略，优先保证可浏览、不黑屏。
+const BLOCK_CAP = 200
+const IMAGE_CAP = 20
+
 export default {
   protected: { url: '', tempId: '' },
 
@@ -402,6 +423,7 @@ export default {
     inputText: '',
     keyboardVisible: false,
     keyboardMode: 'url',
+    useIme: true,
     activeGid: '',
     activeField: '',
     showImageModal: false,
@@ -412,7 +434,11 @@ export default {
 
   computed: {
     displayUrl() { return formatDisplayUrl(this.currentUrl) },
-    navInputText() { return this.inputText || this.displayUrl || '输入网址' },
+    navInputText() {
+      // 字段模式下地址栏始终显示网址，避免把网页输入框内容误显示到地址栏
+      if (this.keyboardMode === 'field') return this.displayUrl || '输入网址'
+      return this.inputText || this.displayUrl || '输入网址'
+    },
     canGoBack() { return this.historyIndex > 0 },
     canGoForward() { return this.historyIndex < this.historyUrls.length - 1 }
   },
@@ -425,7 +451,7 @@ export default {
     console.log('Index onReady, url:', this.url, 'tempId:', this.tempId)
     // 代理验证码与开关存于本机 storage（设置页写入）。两者都读完后才开始加载，
     // 避免异步竞态导致 useProxy 还没读到就发请求。
-    let pending = 2
+    let pending = 3
     const start = () => {
       if (--pending > 0) return
       if (this.tempId) {
@@ -445,6 +471,11 @@ export default {
     storage.get({
       key: 'use_proxy',
       success: (data) => { this.useProxy = (data === 'true' || data === true); start() },
+      fail: () => { start() }
+    })
+    storage.get({
+      key: 'use_ime',
+      success: (data) => { this.useIme = (data !== 'false'); start() },
       fail: () => { start() }
     })
   },
@@ -524,23 +555,41 @@ export default {
       this.activeGid = ''
       this.activeField = ''
       this.keyboardMode = 'url'
+      // 复位编辑缓冲：避免回到 url 模式后地址栏残留字段内容
+      this.inputText = ''
     }
     this.keyboardVisible = false
   },
 
+  // 字段模式下，打字时实时把缓冲同步回页面上被聚焦的输入框块（而不是只显示在地址栏）
+  liveUpdateFieldBlock() {
+    if (this.keyboardMode !== 'field' || !this.activeGid || !this.activeField) return
+    const val = this.inputText
+    const hasVal = !!(val && val.length)
+    this.blocks = this.blocks.map(b => {
+      if (b.kind === 'field' && b.gid === this.activeGid && b.fieldName === this.activeField) {
+        const placeholder = (b.runs[0] && b.runs[0].text) || '输入'
+        return Object.assign({}, b, {
+          runs: [{ text: hasVal ? val : placeholder, cls: hasVal ? 'web-field-text' : 'web-field-placeholder' }]
+        })
+      }
+      return b
+    })
+  },
   // 三方输入法事件：提交字符（中文选词 / 英文逐字母 / 数字）追加到编辑缓冲
   onImeComplete(e) {
     const c = e && e.detail && e.detail.content
-    if (c) this.inputText += c
+    if (c) { this.inputText += c; this.liveUpdateFieldBlock() }
   },
   onImeDelete() {
     this.inputText = this.inputText.slice(0, -1)
+    this.liveUpdateFieldBlock()
   },
   onImeVisible(e) {
     this.keyboardVisible = e && e.detail ? e.detail.visible : this.keyboardVisible
   },
-  // 网址快捷片段（https://、www.、.com、.cn）
-  appendText(s) { this.inputText += s },
+  // 网址快捷片段（https://、www.、.com、.cn）；字段模式下该层不展示
+  appendText(s) { this.inputText += s; this.liveUpdateFieldBlock() },
 
   confirmInput() {
     if (this.keyboardMode === 'field') { this.hideKeyboard(); return }
@@ -551,6 +600,11 @@ export default {
     }
     this.keyboardVisible = false
     this.loadUrl(url)
+  },
+
+  // 独立的「退出」按钮：仅收起输入法，不做任何提交/跳转（字段模式下仍会把已输入内容写回页面）
+  exitKeyboard() {
+    this.hideKeyboard()
   },
 
   loadUrl(url) {
@@ -693,11 +747,19 @@ export default {
   },
 
   parseHtml(html) {
-    this.pageTitle = extractTitle(html) || this.displayUrl
-    const parser = new HtmlParser(getBaseUrl(this.currentUrl))
-    this.htmlElements = parser.parse(html)
-    this.renderBlocks(this.htmlElements)
-    return this.htmlElements.length
+    try {
+      this.pageTitle = extractTitle(html) || this.displayUrl
+      const parser = new HtmlParser(getBaseUrl(this.currentUrl))
+      this.htmlElements = parser.parse(html)
+      this.renderBlocks(this.htmlElements)
+      return this.htmlElements.length
+    } catch (err) {
+      console.error('parseHtml error', err)
+      this.htmlElements = []
+      this.blocks = []
+      this.errorMsg = '页面解析失败'
+      return 0
+    }
   },
 
   /**
@@ -707,6 +769,7 @@ export default {
    */
   renderBlocks(elements) {
     const blocks = []
+    let imageCount = 0
     this.formData = {}
     this.forms = {}
     for (const e of (elements || [])) {
@@ -749,15 +812,22 @@ export default {
         continue
       }
       if (e.type === 'img') {
-        blocks.push({
-          kind: 'image',
-          imgSrc: e.thumbUrl,
-          alt: e.alt || '',
-          boxCls: '',
-          textCls: '',
-          runs: [],
-          _index: e._index
-        })
+        // 图片数量限流：超出上限的图片直接跳过，避免大量 <image> 解码把内存打爆导致黑屏
+        if (imageCount < IMAGE_CAP) {
+          imageCount++
+          blocks.push({
+            kind: 'image',
+            imgSrc: e.thumbUrl,
+            alt: e.alt || '',
+            inline: !!e.inline,
+            imgW: e.imgW || 0,
+            imgH: e.imgH || 0,
+            boxCls: e.inline ? 'img-inline-box' : '',
+            textCls: '',
+            runs: [],
+            _index: e._index
+          })
+        }
         continue
       }
       if (e.type === 'hr') {
@@ -815,6 +885,17 @@ export default {
       })
     }
     blocks.sort((a, b) => a._index - b._index)
+    // block 总数限流：超出上限截断，末尾追加省略提示，避免长页面渲染崩溃黑屏
+    if (blocks.length > BLOCK_CAP) {
+      blocks = blocks.slice(0, BLOCK_CAP)
+      blocks.push({
+        kind: 'text',
+        boxCls: '',
+        textCls: 'sys-note',
+        runs: [{ text: '（为流畅运行，已省略部分内容）', cls: 'sys-note', color: '' }],
+        _index: 1e9
+      })
+    }
     this.blocks = blocks
   },
 
@@ -833,36 +914,56 @@ export default {
 
   openLink(url) { if (url) this.loadUrl(url) },
 
-  // 网页表单提交：组装字段，fetch action，结果重新渲染（Vela 无 <form> 元素，提交自实现）
+  // 网页表单提交：组装字段，按方法导航/提交（Vela 无 <form> 元素，提交自实现）
   submitWebForm(gid) {
     const form = this.forms[gid]
     if (!form || !form.action) {
       this.showToast('此输入框无提交目标')
       return
     }
+    // 提交前先把正在编辑的字段写回（键盘可能还开着，否则 formData 仍是旧值/空值，导致提交空查询）
+    if (this.keyboardMode === 'field' && this.activeGid === gid && this.activeField) {
+      if (!this.formData[gid]) this.formData[gid] = {}
+      this.formData[gid][this.activeField] = this.inputText
+      this.activeGid = ''
+      this.activeField = ''
+      this.keyboardMode = 'url'
+      this.inputText = ''
+      this.keyboardVisible = false
+    }
     const data = this.formData[gid] || {}
     const params = form.fields
       .map(f => encodeURIComponent(f.name) + '=' + encodeURIComponent(data[f.name] || ''))
       .join('&')
-    const opt = {
-      url: form.action,
-      method: (form.method || 'get').toUpperCase(),
-      responseType: 'text',
-      header: {
-        'User-Agent': 'Mozilla/5.0 (compatible; WatchBrowser/1.0)',
-        'Content-Type': 'application/x-www-form-urlencoded'
-      },
-      success: (res) => { this.handleSuccess(res); this.showToast('已提交') },
-      fail: (err) => this.handleError(err)
-    }
-    if (form.method === 'post') {
-      opt.data = params
+    const method = (form.method || 'get').toLowerCase()
+    if (method === 'post') {
+      // POST 无法用 URL 表达：仍 fetch 提交，结果渲染并更新地址栏/历史
+      const opt = {
+        url: form.action,
+        method: 'POST',
+        responseType: 'text',
+        data: params,
+        header: {
+          'User-Agent': 'Mozilla/5.0 (compatible; WatchBrowser/1.0)',
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        success: (res) => {
+          if (this.historyIndex < this.historyUrls.length - 1) this.historyUrls = this.historyUrls.slice(0, this.historyIndex + 1)
+          this.historyUrls.push(form.action)
+          this.historyIndex = this.historyUrls.length - 1
+          this.currentUrl = form.action
+          this.handleSuccess(res)
+        },
+        fail: (err) => this.handleError(err)
+      }
+      this.isLoading = true
+      this.errorMsg = ''
+      fetch.fetch(opt)
     } else {
-      opt.url = form.action + (form.action.indexOf('?') >= 0 ? '&' : '?') + params
+      // GET：直接构造结果 URL，走 loadUrl（含代理兜底 + 历史 + 地址栏更新 + 真正跳转）
+      const target = form.action + (form.action.indexOf('?') >= 0 ? '&' : '?') + params
+      this.loadUrl(target)
     }
-    this.isLoading = true
-    this.errorMsg = ''
-    fetch.fetch(opt)
   },
 
   viewImage(elem) {
@@ -1124,6 +1225,13 @@ export default {
   lines: 0;
 }
 
+/* 渲染限流后的省略提示 */
+.sys-note {
+  color: #8e8e93;
+  font-size: 12px;
+  line-height: 18px;
+}
+
 /* 图片块：文本占位，点击查看大图 */
 .img-block {
   flex-shrink: 0;
@@ -1134,6 +1242,14 @@ export default {
   height: 120px;
   border-radius: 8px;
   resize-mode: cover;
+}
+.img-inline {
+  border-radius: 2px;
+  resize-mode: contain;
+  margin: 1px 0;
+}
+.img-inline-box {
+  margin: 2px 0;
 }
 .img-alt {
   color: #8b949e;
@@ -1299,21 +1415,83 @@ export default {
   font-size: 18px;
 }
 
-/* 输入法快捷片段：独立 fixed 层浮于键盘上方，IME 自身常驻贴底 */
-.kb-quick {
+/* 键盘操作条：fixed 浮于 IME 上方；上排实时显示输入内容，下排为快捷片段（网址模式）+ 退出/完成 */
+.kb-bar {
   position: fixed;
   left: 0;
   right: 0;
-  bottom: 259px;
+  bottom: 263px;
+  flex-direction: column;
+  padding: 4px 8px 6px;
+  background-color: rgba(28, 28, 30, 0.97);
+  border-top: 1px solid #3a3a3c;
+}
+
+.kb-preview {
+  color: #ffffff;
+  font-size: 13px;
+  lines: 1;
+  text-overflow: ellipsis;
+  padding: 2px 4px 6px;
+  border-bottom: 1px solid #2c2c2e;
+  margin-bottom: 6px;
+}
+
+.kb-row {
   flex-direction: row;
-  justify-content: space-around;
-  padding: 0 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.kb-quick {
+  flex: 1;
+  flex-direction: row;
+  justify-content: flex-start;
+  padding-right: 8px;
+}
+
+.kb-actions {
+  flex-direction: row;
+  align-items: center;
+}
+
+.kb-done {
+  width: 56px;
+  height: 32px;
+  margin-left: 8px;
+  border-radius: 16px;
+  background-color: #0a84ff;
+  justify-content: center;
+  align-items: center;
+}
+
+.kb-exit {
+  width: 56px;
+  height: 32px;
+  margin-left: 8px;
+  border-radius: 16px;
+  background-color: #2c2c2e;
+  border: 1px solid #3a3a3c;
+  justify-content: center;
+  align-items: center;
+}
+
+.kb-exit-text {
+  color: #c9d1d9;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.kb-done-text {
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .kb-quick-chip {
-  flex: 1;
   height: 32px;
   margin: 0 3px;
+  padding: 0 10px;
   border-radius: 16px;
   background-color: #2c2c2e;
   border: 1px solid #3a3a3c;
