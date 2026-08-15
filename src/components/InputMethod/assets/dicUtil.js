@@ -23,29 +23,33 @@ let SimpleInputMethod = {
 SimpleInputMethod.initDict = function() {
   // 幂等：已初始化则跳过（组件可能多次挂载）
   if (this.dict.syllableSet) return
-  // 惰性取字典对象（模块只导出工厂函数，页面加载时不建对象；首次 initDict 时才创建，
-  // 把建 3000 词/大表对象的成本从页面入口挪到键盘弹出后的后台——search/chat 秒开的关键之一）
-  this.dict.py2hz = getDict()
-  this.dict.py2hz2 = {}
-  this.dict.py2hz2['i'] = 'i' // 特殊处理
-  this.dict.romaji2kanji = getDictJp()
-
-  // 合法音节集合 + 首字母索引：一次遍历 dic.js
-  this.dict.syllableSet = new Set(syllables)
-  for (let key in this.dict.py2hz) {
-    const ch = key[0]
-    if (!this.dict.py2hz2[ch]) this.dict.py2hz2[ch] = this.dict.py2hz[key]
-    this.dict.syllableSet.add(key)
+  // ── 核心字典（单字拼音→汉字，中文输入最低要求）──
+  // 这三步必须成功，任何一步失败则整个中文输入不可用（getHanzi 首行检查 syllableSet）
+  try {
+    this.dict.py2hz = getDict()
+    this.dict.py2hz2 = {}
+    this.dict.py2hz2['i'] = 'i' // 特殊处理
+    // 合法音节集合 + 首字母索引：仅依赖已安全导入的 syllables 和 py2hz
+    this.dict.syllableSet = new Set(syllables)
+    for (let key in this.dict.py2hz) {
+      const ch = key[0]
+      if (!this.dict.py2hz2[ch]) this.dict.py2hz2[ch] = this.dict.py2hz[key]
+      this.dict.syllableSet.add(key)
+    }
+  } catch (e) {
+    console.error('IME dict core init failed:', e)
+    // 即使核心失败也标记为"已尝试"，避免每次键盘弹出重试
+    this.dict.syllableSet = new Set()
+    return
   }
 
-  // 整词词库（惰性创建）
-  this.dict.words = getWords()
+  // ── 增强功能（词库/简拼/日文，失败不影响基础单字输入）──
+  try { this.dict.romaji2kanji = getDictJp() } catch (e) { console.warn('IME jp dict skipped:', e) }
+  try { this.dict.words = getWords() } catch (e) { console.warn('IME word dict skipped:', e); this.dict.words = {} }
+  try { this.dict.initialsIndex = getInitialsIndex() } catch (e) { console.warn('IME initials index skipped:', e); this.dict.initialsIndex = {} }
 
-  // 简拼索引：预计算倒排索引直接赋值（生成脚本产出，init 不再逐词切分）
-  this.dict.initialsIndex = getInitialsIndex()
   // forwardIndex 分片构建：每片 200 词，剩余排 setTimeout(0) 继续。
-  // 一次性遍历 3000 词是长任务，会占住主线程可感卡顿；分片后首片立即返回，后续零碎完成。
-  this._buildForwardIndex()
+  try { this._buildForwardIndex() } catch (e) { console.warn('IME forward index skipped:', e) }
 }
 
 // 前向索引(首2字母 → 词键列表)分片构建。构建完成前 getMultiHanzi 的 forward 匹配短暂空转，
@@ -54,6 +58,7 @@ SimpleInputMethod._buildForwardIndex = function() {
   const wmap = this.dict.words || {}
   const fwd = this.dict.forwardIndex || (this.dict.forwardIndex = {})
   const keys = Object.keys(wmap)
+  if (keys.length === 0) return  // 无词库时跳过（getWords 可能失败返回 {}）
   const CHUNK = 200
   let i = 0
   const step = () => {
