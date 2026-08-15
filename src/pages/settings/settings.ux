@@ -18,8 +18,8 @@
       <!-- 开关：是否启用 JS 渲染代理（默认关闭 = 直连，普通站点无需验证码） -->
       <div class="switch-row" onclick="toggleProxy">
         <text class="switch-label">启用 JS 渲染代理</text>
-        <div class="switch {{useProxy ? 'on' : ''}}">
-          <div class="switch-knob {{useProxy ? 'on' : ''}}"></div>
+        <div class="switch" style="background-color: {{useProxy ? '#0a84ff' : '#3a3a3c'}}">
+          <div class="switch-knob" style="left: {{useProxy ? 24 : 2}}px"></div>
         </div>
       </div>
       <text class="hint">开启后优先用服务器执行 JS 渲染（需已填入验证码）；关闭则直连，普通站点无需验证码即可浏览。</text>
@@ -266,15 +266,9 @@ export default {
   width: 50px;
   height: 28px;
   border-radius: 14px;
-  background-color: #3a3a3c;
-  padding: 2px;
-  justify-content: flex-start;
+  padding: 0;
+  position: relative;
   transition: background-color 0.2s;
-}
-
-.switch.on {
-  background-color: #0a84ff;
-  justify-content: flex-end;
 }
 
 .switch-knob {
@@ -282,6 +276,9 @@ export default {
   height: 24px;
   border-radius: 12px;
   background-color: #ffffff;
+  position: absolute;
+  top: 2px;
+  transition: left 0.2s;
 }
 
 .token-text {

@@ -621,7 +621,7 @@ export default {
     // 默认「直连优先」：普通静态/SSR 站点无需代理、无需验证码即可正常浏览。
     // 仅当显式开启「JS 渲染代理」且已填验证码时，才优先走服务器渲染代理。
     if (this.useProxy && this.proxyToken) {
-      this._fetchViaProxy(url, true)
+      this._fetchViaProxy(url)
     } else {
       this._loadDirectFirst(url)
     }
@@ -645,7 +645,7 @@ export default {
           const n = this.parseHtml(data)
           if (n === 0 && this.proxyToken) {
             // 直连拿到的是 SPA 空壳 -> 升级走 JS 渲染代理（额外功能）
-            this._fetchViaProxy(url, false)
+            this._fetchViaProxy(url)
             return
           }
           if (n === 0) {
@@ -653,21 +653,22 @@ export default {
           }
           this.isLoading = false
         } else if (this.proxyToken) {
-          this._fetchViaProxy(url, false)
+          this._fetchViaProxy(url)
         } else {
           this.errorMsg = `请求失败：HTTP ${code}`
           this.isLoading = false
         }
       },
       fail: (err) => {
-        if (this.proxyToken) this._fetchViaProxy(url, false)
+        if (this.proxyToken) this._fetchViaProxy(url)
         else this.handleError(err)
       }
     })
   },
 
   // 经服务器 JS 渲染代理获取（Vela 无 webview，SPA 站点需服务器执行 JS 后回传 HTML）
-  _fetchViaProxy(url, fallbackToDirect) {
+  // 代理启用但渲染失败时，自动回退到基础直连，保证至少能看静态内容；仅当直连也失败时真正报错
+  _fetchViaProxy(url) {
     const proxyUrl = this.proxyBase + '?url=' + encodeURIComponent(url) +
       '&token=' + encodeURIComponent(this.proxyToken) + '&mode=body'
     fetch.fetch({
@@ -682,24 +683,21 @@ export default {
           try { data = JSON.stringify(data) } catch (e) { data = String(data) }
         }
         if (code === 200 && data) {
-          this.parseHtml(data)
-          this.isLoading = false
-        } else if (code >= 500) {
-          // 服务端崩了（如 502 Bad Gateway：nginx 反代连不上后端 render-proxy），
-          // 直连 B 站等 SPA 也只会拿到空壳，明确提示服务端未运行而非误导为验证码错误
-          this.errorMsg = 'JS 渲染代理服务端不可用（HTTP ' + code + '），可能是服务端未运行'
-          this.isLoading = false
-        } else if (fallbackToDirect) {
-          // 代理不可用（验证码错误/过期等）-> 回退直连，至少看静态内容，不卡在 401
-          this._loadDirect(url)
+          const n = this.parseHtml(data)
+          if (n === 0) {
+            // 代理返回了内容但解析为空（SPA 壳/错误页）-> 回退基础直连
+            this._loadDirect(url)
+          } else {
+            this.isLoading = false
+          }
         } else {
-          this.errorMsg = 'JS 渲染代理不可用（验证码可能错误），已尝试直连'
-          this.isLoading = false
+          // 代理失败（5xx/401/无数据等）-> 回退基础直连，至少看静态内容
+          this._loadDirect(url)
         }
       },
       fail: () => {
-        if (fallbackToDirect) this._loadDirect(url)
-        else { this.errorMsg = 'JS 渲染代理连接失败，已尝试直连'; this.isLoading = false }
+        // 代理连接失败 -> 回退基础直连
+        this._loadDirect(url)
       }
     })
   },
