@@ -684,6 +684,11 @@ export default {
         if (code === 200 && data) {
           this.parseHtml(data)
           this.isLoading = false
+        } else if (code >= 500) {
+          // 服务端崩了（如 502 Bad Gateway：nginx 反代连不上后端 render-proxy），
+          // 直连 B 站等 SPA 也只会拿到空壳，明确提示服务端未运行而非误导为验证码错误
+          this.errorMsg = 'JS 渲染代理服务端不可用（HTTP ' + code + '），可能是服务端未运行'
+          this.isLoading = false
         } else if (fallbackToDirect) {
           // 代理不可用（验证码错误/过期等）-> 回退直连，至少看静态内容，不卡在 401
           this._loadDirect(url)

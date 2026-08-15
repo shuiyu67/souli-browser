@@ -118,7 +118,8 @@ export default {
   },
 
   toggleProxy() {
-    this.$set('useProxy', !this.useProxy)  // 强制刷新开关 UI
+    // 直接赋值：aiot 快应用里 this.$set('useProxy', ...) 签名不同会抛错并中断整个方法（表现为开关完全无响应），直接用响应式赋值
+    this.useProxy = !this.useProxy
     this.proxyInitRead = true  // 用户已手动操作，onInit 的延迟读回不再覆盖
     storage.set({
       key: 'use_proxy',
